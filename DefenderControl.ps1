@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Defender Control v3.0 - Comprehensive Microsoft Defender Disable/Enable Utility
+    Defender Control v3.1.0 - Comprehensive Microsoft Defender Disable/Enable Utility
 
 .DESCRIPTION
     Professional WPF GUI tool to fully disable or re-enable Microsoft Defender
@@ -15,6 +15,9 @@
       - Strips PPL flags so protected processes don't survive reboot
       - Disables scheduled tasks, context menus, notifications, SmartScreen
       - Creates a System Restore Point before disabling (recommended)
+      - Live status dashboard showing all Defender component states
+      - Tamper Protection detection with step-by-step disable guidance
+      - Scheduled re-enable: auto re-enable Defender after 1-24 hours
 
     WHAT THIS TOOL DOES NOT DO:
       - Does NOT touch Windows Firewall (completely unaffected)
@@ -69,7 +72,7 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 # ==================================================================================
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
 
-$script:Version    = "3.0"
+$script:Version    = "3.1.0"
 $script:DryRun     = $false
 $script:ShowVerbose = $true
 
@@ -145,7 +148,7 @@ try {
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Defender Control"
-        Width="850" Height="780"
+        Width="880" Height="920"
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanMinimize"
         Background="#1a1a2e">
@@ -225,10 +228,105 @@ try {
             <Setter Property="VerticalContentAlignment" Value="Center"/>
             <Setter Property="Cursor" Value="Hand"/>
         </Style>
+
+        <!-- Full ComboBox ControlTemplate for dark mode -->
+        <ControlTemplate x:Key="DarkComboBoxToggleButton" TargetType="ToggleButton">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition/>
+                    <ColumnDefinition Width="20"/>
+                </Grid.ColumnDefinitions>
+                <Border x:Name="Border" Grid.ColumnSpan="2" CornerRadius="6"
+                        Background="#2a2a4a" BorderBrush="#3a3a5a" BorderThickness="1"/>
+                <Border Grid.Column="0" CornerRadius="6,0,0,6" Margin="1"
+                        Background="Transparent"/>
+                <Path x:Name="Arrow" Grid.Column="1" Fill="#95a5a6"
+                      HorizontalAlignment="Center" VerticalAlignment="Center"
+                      Data="M0,0 L4,4 L8,0 Z"/>
+            </Grid>
+        </ControlTemplate>
+
+        <ControlTemplate x:Key="DarkComboBoxTextBox" TargetType="TextBox">
+            <Border x:Name="PART_ContentHost" Focusable="False"
+                    Background="Transparent"/>
+        </ControlTemplate>
+
+        <Style x:Key="DarkComboBox" TargetType="ComboBox">
+            <Setter Property="Foreground" Value="#ecf0f1"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Height" Value="30"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton Name="ToggleButton"
+                                          Template="{StaticResource DarkComboBoxToggleButton}"
+                                          Grid.Column="2" Focusable="False"
+                                          IsChecked="{Binding Path=IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                          ClickMode="Press"/>
+                            <ContentPresenter Name="ContentSite" IsHitTestVisible="False"
+                                              Content="{TemplateBinding SelectionBoxItem}"
+                                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                              ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"
+                                              Margin="8,3,28,3" VerticalAlignment="Center"
+                                              HorizontalAlignment="Left"/>
+                            <Popup Name="Popup" Placement="Bottom"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}"
+                                   AllowsTransparency="True" Focusable="False"
+                                   PopupAnimation="Slide">
+                                <Grid Name="DropDown" SnapsToDevicePixels="True"
+                                      MinWidth="{TemplateBinding ActualWidth}"
+                                      MaxHeight="{TemplateBinding MaxDropDownHeight}">
+                                    <Border x:Name="DropDownBorder"
+                                            Background="#1e1e3e" BorderThickness="1"
+                                            BorderBrush="#3a3a5a" CornerRadius="6"/>
+                                    <ScrollViewer Margin="4,6,4,6" SnapsToDevicePixels="True">
+                                        <StackPanel IsItemsHost="True"
+                                                    KeyboardNavigation.DirectionalNavigation="Contained"/>
+                                    </ScrollViewer>
+                                </Grid>
+                            </Popup>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="ItemContainerStyle">
+                <Setter.Value>
+                    <Style TargetType="ComboBoxItem">
+                        <Setter Property="Foreground" Value="#ecf0f1"/>
+                        <Setter Property="Background" Value="Transparent"/>
+                        <Setter Property="Padding" Value="8,4"/>
+                        <Setter Property="Cursor" Value="Hand"/>
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ComboBoxItem">
+                                    <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                                            Padding="{TemplateBinding Padding}" CornerRadius="4">
+                                        <ContentPresenter/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsHighlighted" Value="True">
+                                            <Setter TargetName="Bd" Property="Background" Value="#2a2a5a"/>
+                                        </Trigger>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter TargetName="Bd" Property="Background" Value="#3498db"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Grid Margin="24,14,24,16">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -249,7 +347,7 @@ try {
                       VerticalAlignment="Center"/>
         </Grid>
 
-        <!-- Status Card -->
+        <!-- Status Card with Buttons -->
         <Border Grid.Row="1" Style="{StaticResource Card}">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -277,15 +375,131 @@ try {
             </Grid>
         </Border>
 
+        <!-- Live Status Dashboard -->
+        <Border Grid.Row="2" Style="{StaticResource Card}">
+            <StackPanel>
+                <TextBlock Text="Live Status Dashboard" FontSize="13" FontWeight="SemiBold"
+                           Foreground="{StaticResource TextSecondary}" Margin="0,0,0,8"/>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Row 0 -->
+                    <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,12,6">
+                        <TextBlock Text="Real-Time Protection" FontSize="11" Foreground="{StaticResource TextDim}"/>
+                        <TextBlock x:Name="dashRTP" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
+                    </StackPanel>
+                    <StackPanel Grid.Row="0" Grid.Column="1" Margin="0,0,12,6">
+                        <TextBlock Text="Tamper Protection" FontSize="11" Foreground="{StaticResource TextDim}"/>
+                        <TextBlock x:Name="dashTamper" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
+                    </StackPanel>
+                    <StackPanel Grid.Row="0" Grid.Column="2" Margin="0,0,12,6">
+                        <TextBlock Text="Cloud Protection" FontSize="11" Foreground="{StaticResource TextDim}"/>
+                        <TextBlock x:Name="dashCloud" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
+                    </StackPanel>
+
+                    <!-- Row 1 -->
+                    <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,0,12,6">
+                        <TextBlock Text="Firewall" FontSize="11" Foreground="{StaticResource TextDim}"/>
+                        <TextBlock x:Name="dashFirewall" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
+                    </StackPanel>
+                    <StackPanel Grid.Row="1" Grid.Column="1" Margin="0,0,12,6">
+                        <TextBlock Text="Defender Service (WinDefend)" FontSize="11" Foreground="{StaticResource TextDim}"/>
+                        <TextBlock x:Name="dashService" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
+                    </StackPanel>
+                    <StackPanel Grid.Row="1" Grid.Column="2" Margin="0,0,12,6">
+                        <TextBlock Text="Anti-Spyware Status" FontSize="11" Foreground="{StaticResource TextDim}"/>
+                        <TextBlock x:Name="dashAntiSpy" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
+                    </StackPanel>
+
+                    <!-- Row 2 -->
+                    <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,0,12,0">
+                        <TextBlock Text="Last Definition Update" FontSize="11" Foreground="{StaticResource TextDim}"/>
+                        <TextBlock x:Name="dashDefUpdate" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
+                    </StackPanel>
+
+                    <!-- Refresh Dashboard button -->
+                    <Button x:Name="btnRefreshDash" Content="Refresh Status" Background="#2a2a4a"
+                            Style="{StaticResource SmallButton}" Grid.Row="0" Grid.Column="3"
+                            VerticalAlignment="Top" Margin="4,0,0,0"/>
+                </Grid>
+            </StackPanel>
+        </Border>
+
+        <!-- Tamper Protection Warning Panel (hidden by default) -->
+        <Border x:Name="tamperWarningPanel" Grid.Row="3" Visibility="Collapsed"
+                Background="#2d1a1a" BorderBrush="#e74c3c" BorderThickness="1"
+                CornerRadius="10" Padding="16,12" Margin="0,0,0,8">
+            <StackPanel>
+                <TextBlock Text="!! TAMPER PROTECTION IS ON !!" FontSize="14" FontWeight="Bold"
+                           Foreground="#e74c3c" Margin="0,0,0,6"/>
+                <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#e8a0a0"
+                           Text="Tamper Protection prevents scripts and tools from modifying Defender settings. You must disable it manually before using the Disable button."/>
+                <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#ecf0f1" Margin="0,8,0,0"
+                           Text="Steps to disable Tamper Protection:"/>
+                <TextBlock FontSize="12" Foreground="#b0bec5" Margin="12,4,0,0"
+                           Text="1. Open Windows Security (search 'Windows Security' in Start)"/>
+                <TextBlock FontSize="12" Foreground="#b0bec5" Margin="12,2,0,0"
+                           Text="2. Click 'Virus &amp; threat protection'"/>
+                <TextBlock FontSize="12" Foreground="#b0bec5" Margin="12,2,0,0"
+                           Text="3. Under 'Virus &amp; threat protection settings', click 'Manage settings'"/>
+                <TextBlock FontSize="12" Foreground="#b0bec5" Margin="12,2,0,0"
+                           Text="4. Scroll down to 'Tamper Protection' and toggle it OFF"/>
+                <TextBlock FontSize="12" Foreground="#b0bec5" Margin="12,2,0,0"
+                           Text="5. Click 'Refresh Status' above to update the dashboard"/>
+                <Button x:Name="btnOpenWSecurity" Content="Open Windows Security" Background="#3a2020"
+                        Style="{StaticResource SmallButton}" HorizontalAlignment="Left" Margin="0,8,0,0"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Scheduled Re-Enable -->
+        <Border Grid.Row="4" Style="{StaticResource Card}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="Schedule Re-Enable:" FontSize="12"
+                           Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center"
+                           Margin="0,0,8,0"/>
+                <ComboBox x:Name="cmbScheduleHours" Grid.Column="1"
+                          Style="{StaticResource DarkComboBox}" Width="80" Margin="0,0,8,0">
+                    <ComboBoxItem Content="1 hour" IsSelected="True"/>
+                    <ComboBoxItem Content="2 hours"/>
+                    <ComboBoxItem Content="4 hours"/>
+                    <ComboBoxItem Content="8 hours"/>
+                    <ComboBoxItem Content="24 hours"/>
+                </ComboBox>
+                <Button x:Name="btnSchedule" Content="Schedule" Background="#8e44ad"
+                        Style="{StaticResource SmallButton}" Grid.Column="2" Margin="0,0,8,0"/>
+                <TextBlock x:Name="txtScheduleStatus" Grid.Column="3" Text="" FontSize="11"
+                           Foreground="{StaticResource TextDim}" VerticalAlignment="Center"/>
+                <Button x:Name="btnCancelSchedule" Content="Cancel" Background="#c0392b"
+                        Style="{StaticResource SmallButton}" Grid.Column="4" Visibility="Collapsed"/>
+            </Grid>
+        </Border>
+
         <!-- Progress Bar -->
-        <Border Grid.Row="2" Background="#16213e" CornerRadius="4" Height="6" Margin="0,0,0,8">
+        <Border Grid.Row="5" Background="#16213e" CornerRadius="4" Height="6" Margin="0,0,0,8">
             <ProgressBar x:Name="progressBar" Minimum="0" Maximum="100" Value="0"
                          Height="6" Background="Transparent" Foreground="#3498db"
                          BorderThickness="0"/>
         </Border>
 
         <!-- Log Header -->
-        <Grid Grid.Row="3" Margin="0,0,0,0">
+        <Grid Grid.Row="6" Margin="0,0,0,0">
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                 <TextBlock Text="Operation Log" FontSize="13" FontWeight="SemiBold"
                            Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center"/>
@@ -304,7 +518,7 @@ try {
         </Grid>
 
         <!-- Log Body -->
-        <Border Grid.Row="4" Style="{StaticResource Card}" Margin="0,6,0,0">
+        <Border Grid.Row="7" Style="{StaticResource Card}" Margin="0,6,0,0">
             <Border Background="#0f1729" CornerRadius="6" Padding="4">
                 <ScrollViewer x:Name="logScroll" VerticalScrollBarVisibility="Auto">
                     <RichTextBox x:Name="rtbLog" Background="Transparent" BorderThickness="0"
@@ -323,7 +537,7 @@ try {
         </Border>
 
         <!-- Footer -->
-        <Grid Grid.Row="5" Margin="0,8,0,0">
+        <Grid Grid.Row="8" Margin="0,8,0,0">
             <TextBlock Text="Windows Firewall is NOT affected by this tool."
                        FontSize="11" Foreground="{StaticResource TextDim}" VerticalAlignment="Center"/>
             <TextBlock x:Name="txtVersion" Text=""
@@ -358,6 +572,26 @@ $chkDryRun   = $window.FindName("chkDryRun")
 $chkVerbose  = $window.FindName("chkVerbose")
 $progressBar = $window.FindName("progressBar")
 
+# Dashboard controls
+$dashRTP       = $window.FindName("dashRTP")
+$dashTamper    = $window.FindName("dashTamper")
+$dashCloud     = $window.FindName("dashCloud")
+$dashFirewall  = $window.FindName("dashFirewall")
+$dashService   = $window.FindName("dashService")
+$dashAntiSpy   = $window.FindName("dashAntiSpy")
+$dashDefUpdate = $window.FindName("dashDefUpdate")
+$btnRefreshDash = $window.FindName("btnRefreshDash")
+
+# Tamper Protection warning panel
+$tamperWarningPanel = $window.FindName("tamperWarningPanel")
+$btnOpenWSecurity   = $window.FindName("btnOpenWSecurity")
+
+# Scheduled re-enable controls
+$cmbScheduleHours  = $window.FindName("cmbScheduleHours")
+$btnSchedule       = $window.FindName("btnSchedule")
+$txtScheduleStatus = $window.FindName("txtScheduleStatus")
+$btnCancelSchedule = $window.FindName("btnCancelSchedule")
+
 # Set dynamic text
 $txtSubtitle.Text = "Comprehensive Microsoft Defender Management  |  $script:OSDetail"
 $txtVersion.Text  = "v$script:Version  |  Running as Administrator"
@@ -367,6 +601,7 @@ $txtVersion.Text  = "v$script:Version  |  Running as Administrator"
 # ==================================================================================
 $script:LogQueue    = [System.Collections.Concurrent.ConcurrentQueue[hashtable]]::new()
 $script:StatusQueue = [System.Collections.Concurrent.ConcurrentQueue[hashtable]]::new()
+$script:DashQueue   = [System.Collections.Concurrent.ConcurrentQueue[hashtable]]::new()
 $script:IsRunning   = $false
 $script:AllLogEntries = [System.Collections.ArrayList]::Synchronized([System.Collections.ArrayList]::new())
 
@@ -390,6 +625,26 @@ function Queue-Status {
         DisableBtn = $DisableBtn; EnableBtn   = $EnableBtn
         Progress   = $Progress;   RunningText = $RunningText
         ShowReboot = $ShowReboot
+    })
+}
+function Queue-Dashboard {
+    param([string]$RTP, [string]$RTPColor,
+          [string]$Tamper, [string]$TamperColor,
+          [string]$Cloud, [string]$CloudColor,
+          [string]$Firewall, [string]$FirewallColor,
+          [string]$Service, [string]$ServiceColor,
+          [string]$AntiSpy, [string]$AntiSpyColor,
+          [string]$DefUpdate, [string]$DefUpdateColor,
+          [bool]$ShowTamperWarning = $false)
+    $script:DashQueue.Enqueue(@{
+        RTP = $RTP; RTPColor = $RTPColor
+        Tamper = $Tamper; TamperColor = $TamperColor
+        Cloud = $Cloud; CloudColor = $CloudColor
+        Firewall = $Firewall; FirewallColor = $FirewallColor
+        Service = $Service; ServiceColor = $ServiceColor
+        AntiSpy = $AntiSpy; AntiSpyColor = $AntiSpyColor
+        DefUpdate = $DefUpdate; DefUpdateColor = $DefUpdateColor
+        ShowTamperWarning = $ShowTamperWarning
     })
 }
 
@@ -452,6 +707,33 @@ $script:uiTimer.Add_Tick({
         if ($st.ShowReboot -eq "show")    { $btnReboot.Visibility = "Visible" }
         if ($st.ShowReboot -eq "hide")    { $btnReboot.Visibility = "Collapsed" }
     }
+
+    # Drain dashboard queue
+    $dsh = $null
+    while ($script:DashQueue.TryDequeue([ref]$dsh)) {
+        $bc = [System.Windows.Media.BrushConverter]::new()
+        $dashRTP.Text = $dsh.RTP
+        $dashRTP.Foreground = $bc.ConvertFromString($dsh.RTPColor)
+        $dashTamper.Text = $dsh.Tamper
+        $dashTamper.Foreground = $bc.ConvertFromString($dsh.TamperColor)
+        $dashCloud.Text = $dsh.Cloud
+        $dashCloud.Foreground = $bc.ConvertFromString($dsh.CloudColor)
+        $dashFirewall.Text = $dsh.Firewall
+        $dashFirewall.Foreground = $bc.ConvertFromString($dsh.FirewallColor)
+        $dashService.Text = $dsh.Service
+        $dashService.Foreground = $bc.ConvertFromString($dsh.ServiceColor)
+        $dashAntiSpy.Text = $dsh.AntiSpy
+        $dashAntiSpy.Foreground = $bc.ConvertFromString($dsh.AntiSpyColor)
+        $dashDefUpdate.Text = $dsh.DefUpdate
+        $dashDefUpdate.Foreground = $bc.ConvertFromString($dsh.DefUpdateColor)
+        if ($dsh.ShowTamperWarning) {
+            $tamperWarningPanel.Visibility = "Visible"
+            $btnDisable.ToolTip = "Tamper Protection must be disabled first. See the warning panel below for instructions."
+        } else {
+            $tamperWarningPanel.Visibility = "Collapsed"
+            $btnDisable.ToolTip = $null
+        }
+    }
 })
 $script:uiTimer.Start()
 
@@ -479,6 +761,26 @@ function Queue-Status {
         DisableBtn = `$DisableBtn; EnableBtn   = `$EnableBtn
         Progress   = `$Progress;   RunningText = `$RunningText
         ShowReboot = `$ShowReboot
+    })
+}
+function Queue-Dashboard {
+    param([string]`$RTP, [string]`$RTPColor,
+          [string]`$Tamper, [string]`$TamperColor,
+          [string]`$Cloud, [string]`$CloudColor,
+          [string]`$Firewall, [string]`$FirewallColor,
+          [string]`$Service, [string]`$ServiceColor,
+          [string]`$AntiSpy, [string]`$AntiSpyColor,
+          [string]`$DefUpdate, [string]`$DefUpdateColor,
+          [bool]`$ShowTamperWarning = `$false)
+    `$DashQueue.Enqueue(@{
+        RTP = `$RTP; RTPColor = `$RTPColor
+        Tamper = `$Tamper; TamperColor = `$TamperColor
+        Cloud = `$Cloud; CloudColor = `$CloudColor
+        Firewall = `$Firewall; FirewallColor = `$FirewallColor
+        Service = `$Service; ServiceColor = `$ServiceColor
+        AntiSpy = `$AntiSpy; AntiSpyColor = `$AntiSpyColor
+        DefUpdate = `$DefUpdate; DefUpdateColor = `$DefUpdateColor
+        ShowTamperWarning = `$ShowTamperWarning
     })
 }
 function Set-RegValue {
@@ -616,6 +918,7 @@ function Start-BackgroundWork {
     $runspace.Open()
     $runspace.SessionStateProxy.SetVariable("LogQueue",    $script:LogQueue)
     $runspace.SessionStateProxy.SetVariable("StatusQueue", $script:StatusQueue)
+    $runspace.SessionStateProxy.SetVariable("DashQueue",   $script:DashQueue)
     $runspace.SessionStateProxy.SetVariable("DryRun",      $script:DryRun)
     $runspace.SessionStateProxy.SetVariable("OSBuild",     $script:OSBuild)
 
@@ -658,49 +961,142 @@ function Start-BackgroundWork {
 }
 
 # ==================================================================================
-#  STATUS REFRESH (async)
+#  STATUS REFRESH (async) - with full dashboard population
 # ==================================================================================
 function Update-StatusAsync {
     Start-BackgroundWork -Work {
         Queue-Info "Querying current Defender status..."
         $enabled  = $true
         $tamperOn = $false
+
+        # Dashboard defaults
+        $rtpText = "OFF"; $rtpColor = "#e74c3c"
+        $tamperText = "OFF"; $tamperColor = "#7f8c8d"
+        $cloudText = "OFF"; $cloudColor = "#e74c3c"
+        $fwText = "OFF"; $fwColor = "#e74c3c"
+        $svcText = "Unknown"; $svcColor = "#7f8c8d"
+        $antiSpyText = "Unknown"; $antiSpyColor = "#7f8c8d"
+        $defUpdateText = "Unknown"; $defUpdateColor = "#7f8c8d"
+
         try {
             Queue-Verbose "  Calling Get-MpComputerStatus..."
             $mpStatus = Get-MpComputerStatus -ErrorAction Stop
+
+            # Real-Time Protection
+            if ($mpStatus.RealTimeProtectionEnabled) {
+                $rtpText = "ON"; $rtpColor = "#2ecc71"
+            } else { $enabled = $false }
             Queue-Verbose "  RealTimeProtectionEnabled : $($mpStatus.RealTimeProtectionEnabled)"
+
+            # Tamper Protection
+            if ($mpStatus.IsTamperProtected) {
+                $tamperOn = $true
+                $tamperText = "ON"; $tamperColor = "#2ecc71"
+            } else {
+                $tamperText = "OFF"; $tamperColor = "#7f8c8d"
+            }
+            Queue-Verbose "  IsTamperProtected         : $($mpStatus.IsTamperProtected)"
+
+            # Cloud Protection (OnAccessProtection as proxy, or check AntivirusSignatureLastUpdated)
+            if ($mpStatus.AntivirusEnabled) {
+                $cloudText = "ON"; $cloudColor = "#2ecc71"
+            } else {
+                $cloudText = "OFF"; $cloudColor = "#e74c3c"
+                $enabled = $false
+            }
             Queue-Verbose "  AntivirusEnabled          : $($mpStatus.AntivirusEnabled)"
+
+            # Anti-Spyware
+            if ($mpStatus.AntispywareEnabled) {
+                $antiSpyText = "Enabled"; $antiSpyColor = "#2ecc71"
+            } else {
+                $antiSpyText = "Disabled"; $antiSpyColor = "#e74c3c"
+            }
             Queue-Verbose "  AntispywareEnabled        : $($mpStatus.AntispywareEnabled)"
+
+            # Last Definition Update
+            if ($mpStatus.AntivirusSignatureLastUpdated) {
+                $defUpdateText = $mpStatus.AntivirusSignatureLastUpdated.ToString("yyyy-MM-dd HH:mm")
+                $daysSince = ((Get-Date) - $mpStatus.AntivirusSignatureLastUpdated).TotalDays
+                if ($daysSince -gt 7) { $defUpdateColor = "#e74c3c" }
+                elseif ($daysSince -gt 3) { $defUpdateColor = "#e67e22" }
+                else { $defUpdateColor = "#2ecc71" }
+            }
+
             Queue-Verbose "  AMServiceEnabled          : $($mpStatus.AMServiceEnabled)"
             Queue-Verbose "  BehaviorMonitorEnabled    : $($mpStatus.BehaviorMonitorEnabled)"
             Queue-Verbose "  IoavProtectionEnabled     : $($mpStatus.IoavProtectionEnabled)"
             Queue-Verbose "  NISEnabled                : $($mpStatus.NISEnabled)"
             Queue-Verbose "  OnAccessProtectionEnabled : $($mpStatus.OnAccessProtectionEnabled)"
-            Queue-Verbose "  IsTamperProtected         : $($mpStatus.IsTamperProtected)"
+
             if (-not $mpStatus.RealTimeProtectionEnabled) { $enabled = $false }
             if (-not $mpStatus.AntivirusEnabled)          { $enabled = $false }
-            if ($mpStatus.IsTamperProtected)              { $tamperOn = $true }
         } catch {
             $enabled = $false
             Queue-Warn "  Could not query Defender: $($_.Exception.Message)"
         }
+
+        # Check DisableAntiSpyware registry
         try {
             $asReg = Get-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender" -Name "DisableAntiSpyware" -ErrorAction SilentlyContinue
             Queue-Verbose "  Policy DisableAntiSpyware : $($asReg.DisableAntiSpyware)"
-            if ($asReg.DisableAntiSpyware -eq 1) { $enabled = $false }
+            if ($asReg.DisableAntiSpyware -eq 1) {
+                $enabled = $false
+                $antiSpyText = "Disabled (GP)"; $antiSpyColor = "#e74c3c"
+            }
         } catch {}
+
+        # WinDefend service
         $svc = Get-Service -Name WinDefend -ErrorAction SilentlyContinue
         if ($svc) {
             Queue-Verbose "  WinDefend service: Status=$($svc.Status) StartType=$($svc.StartType)"
-            if ($svc.Status -ne 'Running') { $enabled = $false }
+            if ($svc.Status -eq 'Running') {
+                $svcText = "Running"; $svcColor = "#2ecc71"
+            } elseif ($svc.Status -eq 'Stopped') {
+                $svcText = "Stopped"; $svcColor = "#e74c3c"
+                $enabled = $false
+            } else {
+                $svcText = "$($svc.Status)"; $svcColor = "#e67e22"
+            }
+            $svcStart = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\WinDefend" -Name "Start" -ErrorAction SilentlyContinue).Start
+            if ($svcStart -eq 4) {
+                $svcText = "Disabled"; $svcColor = "#e74c3c"
+                $enabled = $false
+            }
         } else {
             Queue-Verbose "  WinDefend service not found"
+            $svcText = "Not Found"; $svcColor = "#e74c3c"
             $enabled = $false
         }
-        $tamperText  = if ($tamperOn) { "Tamper Protection: ON" } else { "Tamper Protection: OFF" }
-        $tamperColor = if ($tamperOn) { "#2ecc71" } else { "#7f8c8d" }
+
+        # Firewall status
+        try {
+            $fwProfiles = Get-NetFirewallProfile -ErrorAction Stop
+            $allOn = $true
+            foreach ($p in $fwProfiles) {
+                if (-not $p.Enabled) { $allOn = $false; break }
+            }
+            if ($allOn) { $fwText = "ON"; $fwColor = "#2ecc71" }
+            else { $fwText = "Partial"; $fwColor = "#e67e22" }
+        } catch {
+            $fwText = "Unknown"; $fwColor = "#7f8c8d"
+        }
+
+        # Push dashboard update
+        Queue-Dashboard -RTP $rtpText -RTPColor $rtpColor `
+            -Tamper $tamperText -TamperColor $tamperColor `
+            -Cloud $cloudText -CloudColor $cloudColor `
+            -Firewall $fwText -FirewallColor $fwColor `
+            -Service $svcText -ServiceColor $svcColor `
+            -AntiSpy $antiSpyText -AntiSpyColor $antiSpyColor `
+            -DefUpdate $defUpdateText -DefUpdateColor $defUpdateColor `
+            -ShowTamperWarning $tamperOn
+
+        # Push main status
+        $tamperStatusText  = if ($tamperOn) { "Tamper Protection: ON" } else { "Tamper Protection: OFF" }
+        $tamperStatusColor = if ($tamperOn) { "#2ecc71" } else { "#7f8c8d" }
         if ($enabled) {
-            Queue-Status -StatusText "ENABLED (Active)" -StatusColor "#2ecc71" -TamperText $tamperText -TamperColor $tamperColor -DisableBtn $true -EnableBtn $false -Progress 0 -RunningText "" -ShowReboot "hide"
+            Queue-Status -StatusText "ENABLED (Active)" -StatusColor "#2ecc71" -TamperText $tamperStatusText -TamperColor $tamperStatusColor -DisableBtn $true -EnableBtn $false -Progress 0 -RunningText "" -ShowReboot "hide"
             Queue-Success "Defender is ACTIVE and running"
         } else {
             $tText  = if ($tamperOn) { "Warning: Tamper Protection still ON - disable it in Windows Security first" } else { "Tamper Protection: OFF" }
@@ -1383,6 +1779,47 @@ function Invoke-EnableDefender {
 }
 
 # ==================================================================================
+#  SCHEDULED RE-ENABLE
+# ==================================================================================
+$script:ScheduleTaskName = "DefenderControl_ScheduledReEnable"
+
+function Get-ScheduleHours {
+    $selected = $cmbScheduleHours.SelectedItem
+    if ($null -eq $selected) { return 1 }
+    $text = $selected.Content.ToString()
+    switch ($text) {
+        "1 hour"   { return 1 }
+        "2 hours"  { return 2 }
+        "4 hours"  { return 4 }
+        "8 hours"  { return 8 }
+        "24 hours" { return 24 }
+        default    { return 1 }
+    }
+}
+
+function Update-ScheduleStatus {
+    try {
+        $task = Get-ScheduledTask -TaskName $script:ScheduleTaskName -ErrorAction SilentlyContinue
+        if ($task) {
+            $trigger = $task.Triggers | Select-Object -First 1
+            if ($trigger.StartBoundary) {
+                $triggerTime = [datetime]::Parse($trigger.StartBoundary)
+                $txtScheduleStatus.Text = "Scheduled re-enable at $($triggerTime.ToString('yyyy-MM-dd HH:mm'))"
+            } else {
+                $txtScheduleStatus.Text = "Re-enable task is scheduled"
+            }
+            $btnCancelSchedule.Visibility = "Visible"
+        } else {
+            $txtScheduleStatus.Text = ""
+            $btnCancelSchedule.Visibility = "Collapsed"
+        }
+    } catch {
+        $txtScheduleStatus.Text = ""
+        $btnCancelSchedule.Visibility = "Collapsed"
+    }
+}
+
+# ==================================================================================
 #  EVENT HANDLERS
 # ==================================================================================
 $btnDisable.Add_Click({
@@ -1402,6 +1839,7 @@ $btnEnable.Add_Click({
 })
 
 $btnRefresh.Add_Click({ if (-not $script:IsRunning) { Update-StatusAsync } })
+$btnRefreshDash.Add_Click({ if (-not $script:IsRunning) { Update-StatusAsync } })
 
 $btnReboot.Add_Click({
     $r = [System.Windows.MessageBox]::Show(
@@ -1454,6 +1892,78 @@ $chkVerbose.Add_Unchecked({
 $chkDryRun.Add_Checked({  $script:DryRun = $true })
 $chkDryRun.Add_Unchecked({ $script:DryRun = $false })
 
+$btnOpenWSecurity.Add_Click({
+    try { Start-Process "windowsdefender://threatsettings" } catch {
+        try { Start-Process "ms-settings:windowsdefender" } catch {}
+    }
+})
+
+$btnSchedule.Add_Click({
+    if ($script:IsRunning) { return }
+    $hours = Get-ScheduleHours
+    try {
+        # Remove existing task if any
+        Unregister-ScheduledTask -TaskName $script:ScheduleTaskName -Confirm:$false -ErrorAction SilentlyContinue
+
+        $triggerTime = (Get-Date).AddHours($hours)
+
+        # Build the enable script inline - runs the enable logic via PowerShell
+        $enableScript = @"
+# Defender Control - Scheduled Re-Enable
+`$ErrorActionPreference = 'SilentlyContinue'
+# Remove GP overrides
+Remove-Item -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender' -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender Security Center' -Recurse -Force -ErrorAction SilentlyContinue
+# Restore preferences
+try {
+    Set-MpPreference -DisableRealtimeMonitoring `$false -ErrorAction Stop
+    Set-MpPreference -DisableBehaviorMonitoring `$false -ErrorAction Stop
+    Set-MpPreference -DisableBlockAtFirstSeen `$false -ErrorAction Stop
+    Set-MpPreference -DisableIOAVProtection `$false -ErrorAction Stop
+    Set-MpPreference -MAPSReporting 2 -ErrorAction Stop
+    Set-MpPreference -SubmitSamplesConsent 1 -ErrorAction Stop
+} catch {}
+# Restore service start types
+`$svcDefaults = @{WdBoot=0;WdFilter=0;WinDefend=2;WdNisSvc=3;WdNisDrv=3;SecurityHealthService=3;wscsvc=2}
+foreach (`$kv in `$svcDefaults.GetEnumerator()) {
+    `$p = "HKLM:\SYSTEM\CurrentControlSet\Services\`$(`$kv.Key)"
+    if (Test-Path `$p) { Set-ItemProperty -Path `$p -Name 'Start' -Value `$kv.Value -Type DWord -Force -ErrorAction SilentlyContinue }
+}
+# Start services
+@('WinDefend','WdNisSvc','SecurityHealthService','wscsvc') | ForEach-Object {
+    Start-Service -Name `$_ -ErrorAction SilentlyContinue
+}
+# Update signatures
+Update-MpSignature -ErrorAction SilentlyContinue
+# Self-cleanup
+Unregister-ScheduledTask -TaskName 'DefenderControl_ScheduledReEnable' -Confirm:`$false -ErrorAction SilentlyContinue
+"@
+
+        $encodedCmd = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($enableScript))
+        $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $encodedCmd"
+        $trigger = New-ScheduledTaskTrigger -Once -At $triggerTime
+        $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest -LogonType ServiceAccount
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+
+        Register-ScheduledTask -TaskName $script:ScheduleTaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+
+        Queue-Success "Scheduled Defender re-enable in $hours hour(s) at $($triggerTime.ToString('yyyy-MM-dd HH:mm'))"
+        Update-ScheduleStatus
+    } catch {
+        Queue-Err "Failed to create scheduled task: $($_.Exception.Message)"
+    }
+})
+
+$btnCancelSchedule.Add_Click({
+    try {
+        Unregister-ScheduledTask -TaskName $script:ScheduleTaskName -Confirm:$false -ErrorAction Stop
+        Queue-Success "Scheduled re-enable cancelled"
+        Update-ScheduleStatus
+    } catch {
+        Queue-Err "Failed to cancel schedule: $($_.Exception.Message)"
+    }
+})
+
 # ==================================================================================
 #  INITIALIZE
 # ==================================================================================
@@ -1468,6 +1978,7 @@ $window.Add_Loaded({
     }
     Queue-Info "---"
     Update-StatusAsync
+    Update-ScheduleStatus
 })
 
 $window.Add_Closed({ $script:uiTimer.Stop() })
