@@ -8,6 +8,9 @@ A professional PowerShell WPF utility to comprehensively disable or re-enable Mi
 
 ---
 
+
+![Screenshot](screenshot.png)
+
 ## Why This Exists
 
 Sometimes you need Defender completely out of the way — deploying custom imaging software, running legacy tools that trigger false positives, benchmarking without AV overhead, or configuring kiosk systems. The built-in Windows UI only lets you temporarily disable real-time protection, and it re-enables itself within minutes.
