@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-    Defender Control v3.1.0 - Comprehensive Microsoft Defender Disable/Enable Utility
+    Defender Control v3.2.0 - Comprehensive Microsoft Defender Disable/Enable Utility
 
 .DESCRIPTION
-    Professional WPF GUI tool to fully disable or re-enable Microsoft Defender
+    Professional WPF GUI + CLI tool to fully disable or re-enable Microsoft Defender
     on Windows 10/11. Uses a multi-phase approach covering preferences, group policy
     registry keys, services (with permission escalation), scheduled tasks, context
     menus, notifications, SmartScreen, and Protected Process Light (PPL) flags.
@@ -18,6 +18,7 @@
       - Live status dashboard showing all Defender component states
       - Tamper Protection detection with step-by-step disable guidance
       - Scheduled re-enable: auto re-enable Defender after 1-24 hours
+      - CLI: read-only Status / Health modes with JSON output for automation
 
     WHAT THIS TOOL DOES NOT DO:
       - Does NOT touch Windows Firewall (completely unaffected)
@@ -39,10 +40,44 @@
       - Some operations on heavily locked service keys may require Safe Mode as
         a last resort (the tool tries 4 escalation methods before giving up).
 
+.PARAMETER Mode
+    When supplied, runs in CLI (no-GUI) mode. Values:
+      Status  - read-only snapshot of Defender state (exit 0)
+      Health  - extended read-only enumeration (services, PPL, tasks, policy keys)
+      Verify  - same as Health plus a post-disable sanity check (alias for now)
+      Disable - reserved (CLI disable not yet implemented; use GUI)
+      Enable  - reserved (CLI enable not yet implemented; use GUI)
+
+.PARAMETER Json
+    Emit a single JSON object to stdout instead of human-readable text.
+    Only valid with -Mode. JSON is stable across releases; keys never renamed.
+
+.PARAMETER Silent
+    Suppress non-essential output in CLI mode.
+
+.PARAMETER DryRun
+    Simulate changes without applying them (GUI and CLI both honor this).
+
+.PARAMETER NoRestorePoint
+    Skip creation of the System Restore Point (CLI-only).
+
+.PARAMETER NoReboot
+    Suppress the reboot prompt even when changes require it (CLI-only).
+
+.PARAMETER Help
+    Print CLI usage and exit.
+
 .NOTES
     Author : SysAdminDoc
     License: MIT
     Repo   : https://github.com/SysAdminDoc/DefenderControl
+
+    CLI exit codes:
+      0 - success
+      1 - partial success (some operations failed)
+      2 - blocked by Tamper Protection
+      3 - Safe Mode required for the requested operation
+      4 - usage error / unsupported OS / missing elevation
 
 .LINK
     https://github.com/SysAdminDoc/DefenderControl
@@ -50,19 +85,93 @@
 
 #Requires -Version 5.1
 
+[CmdletBinding()]
+param(
+    [ValidateSet('Disable','Enable','Status','Health','Verify')]
+    [string]$Mode,
+
+    [switch]$DryRun,
+    [switch]$Silent,
+    [switch]$Json,
+    [switch]$Help,
+    [switch]$NoRestorePoint,
+    [switch]$NoReboot
+)
+
 # ==================================================================================
-#  SELF-ELEVATION
+#  CLI EXIT CODES (shared by GUI + CLI)
+# ==================================================================================
+$script:EXIT_OK             = 0
+$script:EXIT_PARTIAL        = 1
+$script:EXIT_TAMPER_BLOCKED = 2
+$script:EXIT_SAFEMODE       = 3
+$script:EXIT_USAGE          = 4
+
+$script:IsCliMode = [bool]$Mode -or $Help.IsPresent
+
+# ==================================================================================
+#  -Help short-circuits before any assemblies or elevation
+# ==================================================================================
+if ($Help.IsPresent) {
+    $usage = @'
+Defender Control - CLI Usage
+
+    DefenderControl.ps1                          Launch the WPF GUI
+    DefenderControl.ps1 -Mode Status             Print current Defender state
+    DefenderControl.ps1 -Mode Status -Json       Emit state as JSON
+    DefenderControl.ps1 -Mode Health             Extended read-only state enum
+    DefenderControl.ps1 -Mode Health -Json       Extended state as JSON
+    DefenderControl.ps1 -Help                    Show this usage
+
+Flags:
+    -Silent         Suppress non-essential CLI output
+    -DryRun         Simulate without applying (GUI + CLI)
+    -NoRestorePoint Skip restore-point creation (CLI-only)
+    -NoReboot       Suppress reboot prompt (CLI-only)
+
+Exit codes:
+    0 success   1 partial   2 tamper-blocked   3 safe-mode-needed   4 usage-error
+
+Note: -Mode Disable|Enable are reserved; use the GUI for mutating operations.
+'@
+    [Console]::Out.WriteLine($usage)
+    exit $script:EXIT_OK
+}
+
+# ==================================================================================
+#  SELF-ELEVATION (forwards original args so CLI mode survives UAC re-launch)
 # ==================================================================================
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)) {
+
+    # Rebuild the original argument list from $PSBoundParameters so
+    # switches/values survive the UAC re-launch.
+    $forwardedArgs = New-Object System.Collections.Generic.List[string]
+    foreach ($kv in $PSBoundParameters.GetEnumerator()) {
+        $name = $kv.Key
+        $val  = $kv.Value
+        if ($val -is [System.Management.Automation.SwitchParameter]) {
+            if ($val.IsPresent) { $forwardedArgs.Add("-$name") | Out-Null }
+        } else {
+            $forwardedArgs.Add("-$name") | Out-Null
+            $forwardedArgs.Add('"' + ($val -replace '"','\"') + '"') | Out-Null
+        }
+    }
     $argList = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
+    if ($forwardedArgs.Count -gt 0) { $argList += " " + ($forwardedArgs -join ' ') }
+
     try {
         Start-Process powershell.exe -ArgumentList $argList -Verb RunAs
     } catch {
-        Add-Type -AssemblyName PresentationFramework
-        [System.Windows.MessageBox]::Show(
-            "This tool requires Administrator privileges.`nPlease right-click and Run as Administrator.",
-            "Elevation Required", "OK", "Error") | Out-Null
+        if ($script:IsCliMode) {
+            [Console]::Error.WriteLine("DefenderControl: Administrator privileges required.")
+            exit $script:EXIT_USAGE
+        } else {
+            Add-Type -AssemblyName PresentationFramework
+            [System.Windows.MessageBox]::Show(
+                "This tool requires Administrator privileges.`nPlease right-click and Run as Administrator.",
+                "Elevation Required", "OK", "Error") | Out-Null
+        }
     }
     exit
 }
@@ -70,10 +179,12 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 # ==================================================================================
 #  ASSEMBLIES & CONSTANTS
 # ==================================================================================
-Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
+if (-not $script:IsCliMode) {
+    Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
+}
 
-$script:Version    = "3.1.0"
-$script:DryRun     = $false
+$script:Version    = "3.2.0"
+$script:DryRun     = [bool]$DryRun
 $script:ShowVerbose = $true
 
 # ==================================================================================
@@ -86,12 +197,16 @@ $script:OSName    = if ($script:OSBuild -ge 22000) { "Windows 11" }
 $script:OSDetail  = "$script:OSName (Build $script:OSBuild)"
 
 if ($script:OSBuild -lt 10240) {
+    if ($script:IsCliMode) {
+        [Console]::Error.WriteLine("DefenderControl: requires Windows 10 (1809+) or Windows 11. Detected: $script:OSDetail")
+        exit $script:EXIT_USAGE
+    }
     [System.Windows.MessageBox]::Show(
         "This tool requires Windows 10 (1809+) or Windows 11.`n`nDetected: $script:OSDetail",
         "Unsupported Windows Version", "OK", "Error") | Out-Null
     exit
 }
-if ($script:OSBuild -lt 17763) {
+if ($script:OSBuild -lt 17763 -and -not $script:IsCliMode) {
     [System.Windows.MessageBox]::Show(
         "This tool requires Windows 10 version 1809 or later.`n`nDetected: $script:OSDetail`n`nSome features may not work correctly on older builds.",
         "Old Windows Build", "OK", "Warning") | Out-Null
@@ -99,10 +214,292 @@ if ($script:OSBuild -lt 17763) {
 
 # Check PowerShell edition
 if ($PSVersionTable.PSEdition -eq 'Core') {
+    if ($script:IsCliMode) {
+        [Console]::Error.WriteLine("DefenderControl: requires Windows PowerShell 5.1 (not PowerShell 7+). Run with powershell.exe, not pwsh.")
+        exit $script:EXIT_USAGE
+    }
     [System.Windows.MessageBox]::Show(
         "This tool requires Windows PowerShell 5.1 (not PowerShell 7+).`n`nPlease run with: powershell.exe -File `"$PSCommandPath`"",
         "Wrong PowerShell Edition", "OK", "Error") | Out-Null
     exit
+}
+
+# ==================================================================================
+#  CLI MODE: read-only state enumeration + dispatch
+# ==================================================================================
+function Get-DefenderState {
+    # Pure query function shared by GUI dashboard and CLI.
+    # Returns a hashtable; callers decide how to render it.
+    [CmdletBinding()]
+    param(
+        [switch]$Extended
+    )
+
+    $state = [ordered]@{
+        Version                    = $script:Version
+        Timestamp                  = (Get-Date).ToString('o')
+        Computer                   = $env:COMPUTERNAME
+        OS                         = $script:OSDetail
+        OSBuild                    = $script:OSBuild
+        RealTimeProtectionEnabled  = $null
+        AntivirusEnabled           = $null
+        AntispywareEnabled         = $null
+        BehaviorMonitorEnabled     = $null
+        IoavProtectionEnabled      = $null
+        NISEnabled                 = $null
+        OnAccessProtectionEnabled  = $null
+        AMServiceEnabled           = $null
+        IsTamperProtected          = $null
+        AntivirusSignatureLastUpdated = $null
+        DefenderEffectivelyEnabled = $false
+        PolicyDisableAntiSpyware   = $null
+        WinDefendStatus            = $null
+        WinDefendStartType         = $null
+        FirewallProfilesEnabled    = $null
+        MpStatusQueryError         = $null
+    }
+
+    try {
+        $mp = Get-MpComputerStatus -ErrorAction Stop
+        $state.RealTimeProtectionEnabled = [bool]$mp.RealTimeProtectionEnabled
+        $state.AntivirusEnabled          = [bool]$mp.AntivirusEnabled
+        $state.AntispywareEnabled        = [bool]$mp.AntispywareEnabled
+        $state.BehaviorMonitorEnabled    = [bool]$mp.BehaviorMonitorEnabled
+        $state.IoavProtectionEnabled     = [bool]$mp.IoavProtectionEnabled
+        $state.NISEnabled                = [bool]$mp.NISEnabled
+        $state.OnAccessProtectionEnabled = [bool]$mp.OnAccessProtectionEnabled
+        $state.AMServiceEnabled          = [bool]$mp.AMServiceEnabled
+        $state.IsTamperProtected         = [bool]$mp.IsTamperProtected
+        if ($mp.AntivirusSignatureLastUpdated) {
+            $state.AntivirusSignatureLastUpdated = $mp.AntivirusSignatureLastUpdated.ToString('o')
+        }
+    } catch {
+        $state.MpStatusQueryError = $_.Exception.Message
+    }
+
+    try {
+        $asReg = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender' `
+            -Name 'DisableAntiSpyware' -ErrorAction SilentlyContinue
+        if ($null -ne $asReg) { $state.PolicyDisableAntiSpyware = [int]$asReg.DisableAntiSpyware }
+    } catch {}
+
+    $svc = Get-Service -Name WinDefend -ErrorAction SilentlyContinue
+    if ($svc) {
+        $state.WinDefendStatus = "$($svc.Status)"
+        try {
+            $svcStart = (Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Services\WinDefend' `
+                -Name 'Start' -ErrorAction SilentlyContinue).Start
+            $startMap = @{ 0='Boot'; 1='System'; 2='Automatic'; 3='Manual'; 4='Disabled' }
+            if ($null -ne $svcStart -and $startMap.ContainsKey([int]$svcStart)) {
+                $state.WinDefendStartType = $startMap[[int]$svcStart]
+            } else {
+                $state.WinDefendStartType = "$($svc.StartType)"
+            }
+        } catch { $state.WinDefendStartType = "$($svc.StartType)" }
+    } else {
+        $state.WinDefendStatus    = 'NotFound'
+        $state.WinDefendStartType = 'NotFound'
+    }
+
+    try {
+        $fw = Get-NetFirewallProfile -ErrorAction Stop
+        $fwMap = [ordered]@{}
+        foreach ($p in $fw) { $fwMap[$p.Name] = [bool]$p.Enabled }
+        $state.FirewallProfilesEnabled = $fwMap
+    } catch {
+        $state.FirewallProfilesEnabled = $null
+    }
+
+    # Effective-enabled summary: RTP + AV on, WinDefend running, no GP disable
+    $state.DefenderEffectivelyEnabled = (
+        $state.RealTimeProtectionEnabled -eq $true -and
+        $state.AntivirusEnabled -eq $true -and
+        $state.WinDefendStatus -eq 'Running' -and
+        $state.WinDefendStartType -ne 'Disabled' -and
+        $state.PolicyDisableAntiSpyware -ne 1
+    )
+
+    if ($Extended.IsPresent) {
+        # Extended: service start types + PPL flags + scheduled tasks + policy keys
+        $services = @('WinDefend','WdFilter','WdBoot','WdNisDrv','WdNisSvc','SecurityHealthService','wscsvc','Sense')
+        $svcTable = [ordered]@{}
+        foreach ($s in $services) {
+            $entry = [ordered]@{ Status='NotFound'; StartType='NotFound'; PPL=$null }
+            $o = Get-Service -Name $s -ErrorAction SilentlyContinue
+            if ($o) {
+                $entry.Status = "$($o.Status)"
+                try {
+                    $start = (Get-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\$s" `
+                        -Name 'Start' -ErrorAction SilentlyContinue).Start
+                    $map = @{ 0='Boot'; 1='System'; 2='Automatic'; 3='Manual'; 4='Disabled' }
+                    if ($null -ne $start -and $map.ContainsKey([int]$start)) { $entry.StartType = $map[[int]$start] }
+                } catch {}
+                try {
+                    $launch = (Get-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\$s" `
+                        -Name 'LaunchProtected' -ErrorAction SilentlyContinue).LaunchProtected
+                    if ($null -ne $launch) { $entry.PPL = [int]$launch } else { $entry.PPL = 0 }
+                } catch { $entry.PPL = $null }
+            }
+            $svcTable[$s] = $entry
+        }
+        $state.Services = $svcTable
+
+        $taskNames = @(
+            'Microsoft\Windows\Windows Defender\Windows Defender Cache Maintenance',
+            'Microsoft\Windows\Windows Defender\Windows Defender Cleanup',
+            'Microsoft\Windows\Windows Defender\Windows Defender Scheduled Scan',
+            'Microsoft\Windows\Windows Defender\Windows Defender Verification',
+            'Microsoft\Windows\ExploitGuard\ExploitGuard MDM policy Refresh'
+        )
+        $taskTable = [ordered]@{}
+        foreach ($t in $taskNames) {
+            try {
+                $parts = $t -split '\\'
+                $name  = $parts[-1]
+                $path  = '\' + ($parts[0..($parts.Count-2)] -join '\') + '\'
+                $task  = Get-ScheduledTask -TaskPath $path -TaskName $name -ErrorAction SilentlyContinue
+                if ($task) { $taskTable[$name] = "$($task.State)" } else { $taskTable[$name] = 'NotFound' }
+            } catch { $taskTable[($t -split '\\')[-1]] = 'Error' }
+        }
+        $state.ScheduledTasks = $taskTable
+
+        $policyKeys = [ordered]@{
+            'DisableAntiSpyware'                              = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender'
+            'DisableRealtimeMonitoring'                       = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection'
+            'DisableBehaviorMonitoring'                       = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection'
+            'DisableOnAccessProtection'                       = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection'
+            'DisableScanOnRealtimeEnable'                     = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection'
+            'DisableIOAVProtection'                           = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection'
+            'SpynetReporting'                                 = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Spynet'
+            'SubmitSamplesConsent'                            = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Spynet'
+        }
+        $polTable = [ordered]@{}
+        foreach ($kv in $policyKeys.GetEnumerator()) {
+            try {
+                $v = (Get-ItemProperty -LiteralPath $kv.Value -Name $kv.Key -ErrorAction SilentlyContinue).$($kv.Key)
+                if ($null -ne $v) { $polTable[$kv.Key] = [int]$v } else { $polTable[$kv.Key] = $null }
+            } catch { $polTable[$kv.Key] = $null }
+        }
+        $state.PolicyKeys = $polTable
+
+        # Third-party AV detection via Security Center (informational only)
+        try {
+            $av = Get-CimInstance -Namespace 'root\SecurityCenter2' -ClassName 'AntivirusProduct' -ErrorAction SilentlyContinue
+            if ($av) {
+                $state.ThirdPartyAV = @($av | Where-Object { $_.displayName -notmatch 'Windows Defender|Microsoft Defender' } |
+                    ForEach-Object { $_.displayName })
+            } else {
+                $state.ThirdPartyAV = @()
+            }
+        } catch { $state.ThirdPartyAV = $null }
+    }
+
+    return $state
+}
+
+function Write-CliLine {
+    # Single stream to stdout; avoids Write-Host pollution and keeps -Silent honest.
+    param([string]$Text, [switch]$ErrorStream)
+    if ($script:Silent -and -not $ErrorStream.IsPresent) { return }
+    if ($ErrorStream.IsPresent) { [Console]::Error.WriteLine($Text) }
+    else { [Console]::Out.WriteLine($Text) }
+}
+
+function Invoke-CliMode {
+    param(
+        [string]$Mode,
+        [switch]$Json,
+        [switch]$Silent
+    )
+
+    $script:Silent = $Silent.IsPresent
+
+    switch ($Mode) {
+        { $_ -in 'Status','Health','Verify' } {
+            $extended = ($_ -in 'Health','Verify')
+            $state    = Get-DefenderState -Extended:$extended
+
+            if ($Json.IsPresent) {
+                # Depth 6 covers nested services/tasks/policy/firewall tables.
+                [Console]::Out.WriteLine(($state | ConvertTo-Json -Depth 6 -Compress:$false))
+            } else {
+                Write-CliLine ("Defender Control v{0} - {1} snapshot" -f $state.Version, $Mode)
+                Write-CliLine ("Host: {0}  OS: {1}" -f $state.Computer, $state.OS)
+                Write-CliLine '---'
+                Write-CliLine ("Real-Time Protection    : {0}" -f $state.RealTimeProtectionEnabled)
+                Write-CliLine ("Antivirus Enabled       : {0}" -f $state.AntivirusEnabled)
+                Write-CliLine ("Antispyware Enabled     : {0}" -f $state.AntispywareEnabled)
+                Write-CliLine ("Behavior Monitor        : {0}" -f $state.BehaviorMonitorEnabled)
+                Write-CliLine ("NIS Enabled             : {0}" -f $state.NISEnabled)
+                Write-CliLine ("Tamper Protection       : {0}" -f $state.IsTamperProtected)
+                Write-CliLine ("Last Signature Update   : {0}" -f $state.AntivirusSignatureLastUpdated)
+                Write-CliLine ("WinDefend Service       : {0} (Start: {1})" -f $state.WinDefendStatus, $state.WinDefendStartType)
+                Write-CliLine ("Policy DisableAntiSpy   : {0}" -f $state.PolicyDisableAntiSpyware)
+                Write-CliLine ("Effectively Enabled     : {0}" -f $state.DefenderEffectivelyEnabled)
+                if ($state.FirewallProfilesEnabled) {
+                    $fwLine = ($state.FirewallProfilesEnabled.GetEnumerator() |
+                        ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ' '
+                    Write-CliLine ("Firewall Profiles       : {0}" -f $fwLine)
+                }
+                if ($extended -and $state.Services) {
+                    Write-CliLine ''
+                    Write-CliLine 'Services (Status / Start / PPL):'
+                    foreach ($s in $state.Services.GetEnumerator()) {
+                        Write-CliLine ("  {0,-24} {1,-10} {2,-10} PPL={3}" -f `
+                            $s.Key, $s.Value.Status, $s.Value.StartType, $s.Value.PPL)
+                    }
+                }
+                if ($extended -and $state.ScheduledTasks) {
+                    Write-CliLine ''
+                    Write-CliLine 'Scheduled Tasks:'
+                    foreach ($t in $state.ScheduledTasks.GetEnumerator()) {
+                        Write-CliLine ("  {0,-50} {1}" -f $t.Key, $t.Value)
+                    }
+                }
+                if ($extended -and $state.PolicyKeys) {
+                    Write-CliLine ''
+                    Write-CliLine 'Policy Keys (null = not set):'
+                    foreach ($p in $state.PolicyKeys.GetEnumerator()) {
+                        Write-CliLine ("  {0,-40} {1}" -f $p.Key, $p.Value)
+                    }
+                }
+                if ($extended -and $null -ne $state.ThirdPartyAV) {
+                    Write-CliLine ''
+                    $avCount = @($state.ThirdPartyAV).Count
+                    if ($avCount -eq 0) {
+                        Write-CliLine 'Third-party AV          : none detected'
+                    } else {
+                        Write-CliLine ("Third-party AV          : {0}" -f (($state.ThirdPartyAV) -join ', '))
+                    }
+                }
+                if ($state.MpStatusQueryError) {
+                    Write-CliLine ("WARN: Get-MpComputerStatus failed: {0}" -f $state.MpStatusQueryError) -ErrorStream
+                }
+            }
+
+            if ($state.IsTamperProtected -eq $true) { exit $script:EXIT_TAMPER_BLOCKED }
+            exit $script:EXIT_OK
+        }
+
+        'Disable' {
+            Write-CliLine "DefenderControl: -Mode Disable is reserved. Use the GUI for mutating operations." -ErrorStream
+            exit $script:EXIT_USAGE
+        }
+        'Enable'  {
+            Write-CliLine "DefenderControl: -Mode Enable is reserved. Use the GUI for mutating operations." -ErrorStream
+            exit $script:EXIT_USAGE
+        }
+        default {
+            Write-CliLine "DefenderControl: unknown mode '$Mode'" -ErrorStream
+            exit $script:EXIT_USAGE
+        }
+    }
+}
+
+if ($script:IsCliMode) {
+    Invoke-CliMode -Mode $Mode -Json:$Json -Silent:$Silent
+    # Invoke-CliMode always exits; defensive fall-through:
+    exit $script:EXIT_USAGE
 }
 
 # ==================================================================================
