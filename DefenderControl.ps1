@@ -87,7 +87,7 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet('Disable','Enable','Status','Health','Verify')]
+    [ValidateSet('Disable','Enable','Status','Health','Verify','Manifest')]
     [string]$Mode,
 
     [switch]$DryRun,
@@ -121,6 +121,8 @@ Defender Control - CLI Usage
     DefenderControl.ps1 -Mode Status -Json       Emit state as JSON
     DefenderControl.ps1 -Mode Health             Extended read-only state enum
     DefenderControl.ps1 -Mode Health -Json       Extended state as JSON
+    DefenderControl.ps1 -Mode Manifest            Print the latest undo manifest
+    DefenderControl.ps1 -Mode Manifest -Json      Latest manifest as JSON
     DefenderControl.ps1 -Help                    Show this usage
 
 Flags:
@@ -478,6 +480,29 @@ function Invoke-CliMode {
             }
 
             if ($state.IsTamperProtected -eq $true) { exit $script:EXIT_TAMPER_BLOCKED }
+            exit $script:EXIT_OK
+        }
+
+        'Manifest' {
+            $dir = Join-Path $env:ProgramData 'DefenderControl\manifests'
+            if (-not (Test-Path $dir)) {
+                Write-CliLine "No manifests directory yet. Run a Disable/Enable first." -ErrorStream
+                exit $script:EXIT_USAGE
+            }
+            $latest = Get-ChildItem -Path $dir -Filter '*.json' -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if (-not $latest) {
+                Write-CliLine "No manifests found in $dir" -ErrorStream
+                exit $script:EXIT_USAGE
+            }
+            $text = Get-Content -Raw -Path $latest.FullName
+            if ($Json.IsPresent) {
+                [Console]::Out.WriteLine($text)
+            } else {
+                Write-CliLine ("Latest manifest: " + $latest.FullName)
+                Write-CliLine '---'
+                [Console]::Out.WriteLine($text)
+            }
             exit $script:EXIT_OK
         }
 
@@ -1293,6 +1318,96 @@ function Set-ServicePPL {
     else { Queue-Warn "  `$ServiceName : Could not change LaunchProtected (may need Safe Mode)" }
     return `$result
 }
+function Get-FirewallSnapshot {
+    # Returns a plain hashtable of firewall profile state + protected service state.
+    # Used as before/after pair to prove this tool did not touch the firewall.
+    `$snap = [ordered]@{}
+    try {
+        Get-NetFirewallProfile -ErrorAction Stop | ForEach-Object {
+            `$snap["Profile_`$(`$_.Name)_Enabled"] = [bool]`$_.Enabled
+        }
+    } catch {
+        Queue-Verbose "  Firewall snapshot: Get-NetFirewallProfile failed (`$(`$_.Exception.Message))"
+    }
+    foreach (`$svc in @('mpssvc','BFE')) {
+        `$o = Get-Service -Name `$svc -ErrorAction SilentlyContinue
+        if (`$o) {
+            `$snap["Service_`${svc}_Status"]    = "`$(`$o.Status)"
+            `$snap["Service_`${svc}_StartType"] = "`$(`$o.StartType)"
+        } else {
+            `$snap["Service_`${svc}_Status"]    = 'NotFound'
+            `$snap["Service_`${svc}_StartType"] = 'NotFound'
+        }
+    }
+    return `$snap
+}
+function Test-FirewallIntact {
+    # Before/After are ordered-dict-or-hashtable. Use .Contains for cross-compat.
+    param(`$Before, `$After)
+    `$diffs = @()
+    if (`$null -eq `$Before -or `$null -eq `$After) { return ,`$diffs }
+    foreach (`$k in @(`$Before.Keys)) {
+        if (`$After.Contains(`$k) -and `$After[`$k] -ne `$Before[`$k]) {
+            `$diffs += "`${k}: `$(`$Before[`$k]) -> `$(`$After[`$k])"
+        }
+    }
+    return ,`$diffs  # force array return
+}
+function Get-ThirdPartyAVList {
+    # Query Security Center for registered AV products; exclude Microsoft Defender.
+    try {
+        `$products = Get-CimInstance -Namespace 'root\SecurityCenter2' -ClassName 'AntivirusProduct' -ErrorAction Stop
+        if (-not `$products) { return @() }
+        return @(`$products |
+            Where-Object { `$_.displayName -notmatch 'Windows Defender|Microsoft Defender' } |
+            ForEach-Object { `$_.displayName })
+    } catch {
+        Queue-Verbose "  Third-party AV detection failed: `$(`$_.Exception.Message)"
+        return `$null
+    }
+}
+function New-DefenderControlManifest {
+    param([string]`$Operation, [bool]`$DryRunFlag)
+    `$dir = Join-Path `$env:ProgramData 'DefenderControl\manifests'
+    if (-not (Test-Path `$dir)) {
+        try { New-Item -Path `$dir -ItemType Directory -Force -ErrorAction Stop | Out-Null } catch {
+            Queue-Verbose "  Manifest dir create failed: `$(`$_.Exception.Message)"
+            return `$null
+        }
+    }
+    `$ts   = Get-Date -Format 'yyyyMMdd-HHmmss'
+    `$file = Join-Path `$dir ("`$Operation-`$ts.json")
+    return [ordered]@{
+        schemaVersion   = 1
+        operation       = `$Operation
+        dryRun          = `$DryRunFlag
+        startedAt       = (Get-Date).ToString('o')
+        host            = `$env:COMPUTERNAME
+        osBuild         = `$OSBuild
+        firewallBefore  = `$null
+        firewallAfter   = `$null
+        firewallIntact  = `$null
+        firewallDiffs   = @()
+        thirdPartyAV    = @()
+        phasesCompleted = @()
+        finishedAt      = `$null
+        path            = `$file
+    }
+}
+function Save-DefenderControlManifest {
+    param(`$Manifest)
+    if (`$null -eq `$Manifest) { return `$null }
+    `$Manifest.finishedAt = (Get-Date).ToString('o')
+    try {
+        `$json = (`$Manifest | ConvertTo-Json -Depth 8)
+        [System.IO.File]::WriteAllText(`$Manifest.path, `$json, [System.Text.Encoding]::UTF8)
+        Queue-Info "  Undo manifest saved: `$(`$Manifest.path)"
+        return `$Manifest.path
+    } catch {
+        Queue-Warn "  Manifest save failed: `$(`$_.Exception.Message)"
+        return `$null
+    }
+}
 "@
 
 # ==================================================================================
@@ -1518,8 +1633,9 @@ function Invoke-DisableDefender {
         $systrayPath   = "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender Security Center\Systray"
         $runPath       = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
         $explorerPath  = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
-        $totalPhases = 10
+        $totalPhases = 11
         $phase = 0
+        $manifest = New-DefenderControlManifest -Operation 'Disable' -DryRunFlag $DryRun
 
         if ($DryRun) {
             Queue-Warn "========== DRY RUN MODE - No changes will be made =========="
@@ -1528,6 +1644,28 @@ function Invoke-DisableDefender {
         Queue-Info "  DISABLING MICROSOFT DEFENDER"
         Queue-Info "============================================"
         Start-Sleep -Milliseconds 100
+
+        # -- Phase 0: Safety pre-flight (firewall snapshot + third-party AV) ----------
+        Queue-Phase "--- Phase 0 : Safety Pre-Flight ---"
+        $fwBefore = Get-FirewallSnapshot
+        if ($manifest) { $manifest.firewallBefore = $fwBefore }
+        Queue-Verbose "  Firewall snapshot captured ($($fwBefore.Count) fields)"
+
+        $tpAv = Get-ThirdPartyAVList
+        if ($manifest) {
+            if ($null -eq $tpAv) { $manifest.thirdPartyAV = @() }
+            else { $manifest.thirdPartyAV = @($tpAv) }
+        }
+        if ($null -eq $tpAv) {
+            Queue-Warn "  Could not query Security Center for third-party AV"
+        } elseif ((@($tpAv)).Count -eq 0) {
+            Queue-Warn "  No third-party antivirus detected. After disabling Defender, this system will have"
+            Queue-Warn "  NO real-time malware protection. Consider installing one (e.g. ESET, Bitdefender,"
+            Queue-Warn "  Malwarebytes) before rebooting, unless this is an air-gapped / sandbox system."
+        } else {
+            Queue-Success "  Third-party AV detected: $((@($tpAv)) -join ', ')"
+        }
+        Start-Sleep -Milliseconds 60
 
         # -- Phase 1: System Restore Point -----------------------------------------------
         $phase++
@@ -1839,6 +1977,30 @@ function Invoke-DisableDefender {
             } catch { Queue-Info "  WinDefend service stop blocked (PPL) - will not restart after reboot" }
         }
 
+        # -- Phase 11: Firewall Integrity Verification ----------------------------------
+        $phase++
+        Queue-Status -StatusText "DISABLING..." -StatusColor "#e67e22" -TamperText "" -TamperColor "#7f8c8d" -DisableBtn $false -EnableBtn $false -Progress ([int]($phase / $totalPhases * 100)) -RunningText "Phase $phase/$totalPhases - Firewall integrity check"
+        Queue-Phase "--- Phase $phase/$totalPhases : Firewall Integrity Verification ---"
+        $fwAfter = Get-FirewallSnapshot
+        $fwDiffs = Test-FirewallIntact -Before $fwBefore -After $fwAfter
+        if ($manifest) {
+            $manifest.firewallAfter  = $fwAfter
+            $manifest.firewallDiffs  = @($fwDiffs)
+            $manifest.firewallIntact = ((@($fwDiffs)).Count -eq 0)
+            $manifest.phasesCompleted = @('Pre-flight','RestorePoint','TamperCheck','Preferences','GroupPolicy','Notifications','ScheduledTasks','Services','ContextMenus','Additional','Processes','FirewallVerify')
+        }
+        if ((@($fwDiffs)).Count -eq 0) {
+            Queue-Success "  Firewall state unchanged - tool honored the firewall-untouched guarantee"
+        } else {
+            Queue-Err   "  Firewall state diverged from pre-flight snapshot!"
+            foreach ($d in @($fwDiffs)) { Queue-Err "    $d" }
+            Queue-Warn  "  This should never happen. Please file an issue with the operation log."
+        }
+        Start-Sleep -Milliseconds 60
+
+        # -- Manifest: persist undo/audit manifest --------------------------------------
+        $null = Save-DefenderControlManifest -Manifest $manifest
+
         # -- Final Status ----------------------------------------------------------------
         Queue-Info "============================================"
         if ($DryRun) {
@@ -1878,8 +2040,9 @@ function Invoke-EnableDefender {
     Start-BackgroundWork -AutoRefresh -Work {
         $runPath      = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
         $explorerPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
-        $totalPhases  = 7
+        $totalPhases  = 8
         $phase        = 0
+        $manifest = New-DefenderControlManifest -Operation 'Enable' -DryRunFlag $DryRun
 
         if ($DryRun) {
             Queue-Warn "========== DRY RUN MODE - No changes will be made =========="
@@ -1888,6 +2051,11 @@ function Invoke-EnableDefender {
         Queue-Info "  RE-ENABLING MICROSOFT DEFENDER"
         Queue-Info "============================================"
         Start-Sleep -Milliseconds 100
+
+        # -- Phase 0: Firewall snapshot (for post-enable integrity check) --------------
+        $fwBefore = Get-FirewallSnapshot
+        if ($manifest) { $manifest.firewallBefore = $fwBefore }
+        Queue-Verbose "Firewall snapshot captured ($($fwBefore.Count) fields)"
 
         # -- Phase 1: Remove Policy Overrides -------------------------------------------
         $phase++
@@ -2153,6 +2321,28 @@ function Invoke-EnableDefender {
             Queue-Verbose "  AMServiceEnabled: $($st.AMServiceEnabled)"
             if ($st.RealTimeProtectionEnabled -and $st.AntivirusEnabled) { $ok = $true }
         } catch { Queue-Warn "  Verify failed (reboot needed): $($_.Exception.Message)" }
+
+        # -- Phase 8: Firewall Integrity Verification -----------------------------------
+        $phase++
+        Queue-Status -StatusText "ENABLING..." -StatusColor "#e67e22" -TamperText "" -TamperColor "#7f8c8d" -DisableBtn $false -EnableBtn $false -Progress ([int]($phase / $totalPhases * 100)) -RunningText "Phase $phase/$totalPhases - Firewall integrity check"
+        Queue-Phase "--- Phase $phase/$totalPhases : Firewall Integrity Verification ---"
+        $fwAfter = Get-FirewallSnapshot
+        $fwDiffs = Test-FirewallIntact -Before $fwBefore -After $fwAfter
+        if ($manifest) {
+            $manifest.firewallAfter   = $fwAfter
+            $manifest.firewallDiffs   = @($fwDiffs)
+            $manifest.firewallIntact  = ((@($fwDiffs)).Count -eq 0)
+            $manifest.phasesCompleted = @('FirewallSnapshot','RemovePolicies','RestorePreferences','RestoreServices','ScheduledTasks','ContextMenusSystray','SignatureUpdate','Verify','FirewallVerify')
+        }
+        if ((@($fwDiffs)).Count -eq 0) {
+            Queue-Success "  Firewall state unchanged - tool honored the firewall-untouched guarantee"
+        } else {
+            Queue-Err "  Firewall state diverged from pre-enable snapshot!"
+            foreach ($d in @($fwDiffs)) { Queue-Err "    $d" }
+        }
+
+        # -- Manifest: persist undo/audit manifest --------------------------------------
+        $null = Save-DefenderControlManifest -Manifest $manifest
 
         Queue-Info "============================================"
         if ($DryRun) {
