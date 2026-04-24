@@ -72,9 +72,25 @@ Check the **Dry Run** checkbox before clicking Disable or Enable. The tool will 
 ### Command Line
 
 ```powershell
-# Run directly
+# Launch the WPF GUI
 powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1"
+
+# Print current Defender state
+powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Status
+
+# Extended state: services + PPL + scheduled tasks + policy keys + third-party AV
+powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Health
+
+# Emit stable JSON for automation pipelines
+powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Health -Json
+
+# Show CLI usage
+powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Help
 ```
+
+**Exit codes:** `0` success, `1` partial, `2` blocked by Tamper Protection, `3` Safe Mode required, `4` usage / OS error.
+
+`-Mode Disable` and `-Mode Enable` are reserved — use the GUI for mutating operations. Read-only Status / Health / Verify modes are CLI-safe.
 
 ---
 
