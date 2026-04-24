@@ -4,6 +4,16 @@ All notable changes to DefenderControl will be documented in this file.
 
 ## Unreleased
 
+## [v3.2.1] - 2026-04-24
+
+### Fixed
+- Running the script from PowerShell 7 (pwsh.exe) no longer errors out with
+  "Wrong PowerShell Edition". The script now detects PS 7 / Core and
+  auto-relaunches itself under Windows PowerShell 5.1 (`powershell.exe`) with
+  all original arguments preserved. CLI mode waits synchronously so stdout /
+  stderr / exit codes return to the caller; GUI mode fires a new window. If
+  the caller isn't already elevated, the re-launch also handles UAC.
+
 ## [v3.2.0] - 2026-04-24
 
 ### Added
