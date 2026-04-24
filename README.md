@@ -1,5 +1,3 @@
-<p align="center"><img src="icon.svg" width="128" height="128" alt="DefenderControl"></p>
-
 # Defender Control
 
 A professional PowerShell WPF utility to comprehensively disable or re-enable Microsoft Defender on Windows 10/11. Dark-themed GUI with fully async operations, detailed logging, and complete reversibility.

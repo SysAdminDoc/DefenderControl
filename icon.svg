@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
-  <rect width="128" height="128" rx="24" fill="#1a1a2e"/>
-  <path d="M64 24L36 36v24c0 18 12 34 28 40 16-6 28-22 28-40V36L64 24z" fill="none" stroke="#3498db" stroke-width="4"/>
-  <rect x="52" y="48" width="24" height="14" rx="7" fill="#555" stroke="#ccc" stroke-width="2"/>
-  <circle cx="70" cy="55" r="5" fill="#e74c3c"/>
-  <text x="64" y="108" text-anchor="middle" fill="#7f8c8d" font-family="Segoe UI,sans-serif" font-size="10" font-weight="600">CONTROL</text>
-</svg>

@@ -3,3 +3,7 @@
 *.tmp
 .vs/
 CLAUDE.md
+CODEX_CHANGELOG.md
+.claude/
+.codex/
+.factory/
