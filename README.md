@@ -14,7 +14,7 @@ Sometimes you need Defender completely out of the way — deploying custom imagi
 
 Defender Control performs a thorough multi-phase disable that persists across reboots by targeting preferences, group policy registry keys, services, scheduled tasks, PPL flags, and more. Everything is fully reversible with a single click.
 
-> **Windows Firewall is completely untouched.** This tool only manages Defender antivirus components.
+> **Windows Firewall is completely untouched.** This tool only manages Defender antivirus components. Starting in v3.2.0, this guarantee is machine-checked: every Disable/Enable run snapshots Get-NetFirewallProfile and the mpssvc/BFE service state before the first change and verifies it after the last change. Any divergence is logged as an error.
 
 ---
 
@@ -33,6 +33,9 @@ Defender Control performs a thorough multi-phase disable that persists across re
 - **OS Build Awareness** — Detects Win10/11, warns on deprecated GP keys (Win11 22H2+), blocks unsupported versions
 - **Self-Elevation** — Automatically requests Administrator via UAC
 - **Orphan Cleanup** — Removes leftover scheduled tasks from interrupted previous runs
+- **Firewall Integrity Guard** — Snapshots firewall profile state + mpssvc/BFE service state before Phase 1; verifies no divergence after Phase 10
+- **Third-Party AV Pre-Flight** — Warns via Security Center WMI when no non-Microsoft AV is registered before disabling
+- **Undo / Audit Manifest** — Every Disable/Enable writes a JSON audit record to `%ProgramData%\DefenderControl\manifests\`; view with `-Mode Manifest`
 
 ---
 

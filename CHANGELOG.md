@@ -5,13 +5,26 @@ All notable changes to DefenderControl will be documented in this file.
 ## Unreleased
 
 ### Added
-- CLI mode with `-Mode Status|Health|Verify` for read-only state enumeration
+- CLI mode with `-Mode Status|Health|Verify|Manifest` for read-only state
 - `-Json` flag emits stable JSON (single object) for automation pipelines
 - `-Silent`, `-DryRun`, `-NoRestorePoint`, `-NoReboot`, `-Help` CLI flags
 - Stable CLI exit codes: 0 success / 1 partial / 2 tamper-blocked / 3 safe-mode / 4 usage
 - `Get-DefenderState` shared query function used by GUI dashboard and CLI
 - Extended Health mode: per-service PPL flag enumeration, scheduled task state,
   policy-key values, third-party AV detection via Security Center
+- **Firewall integrity guard**: Disable/Enable both snapshot Get-NetFirewallProfile
+  state + mpssvc/BFE service state before the first change and verify after the
+  last change. Any divergence is logged as an ERROR so the "firewall untouched"
+  guarantee is now machine-checked, not just documented.
+- **Third-party AV pre-flight**: Phase 0 of Disable queries the Security Center
+  WMI namespace (`root\SecurityCenter2`) and warns prominently when no
+  non-Microsoft AV is registered. The operation still proceeds so air-gapped /
+  sandbox use cases aren't blocked.
+- **Undo/audit manifest**: every Disable/Enable persists a JSON manifest under
+  `%ProgramData%\DefenderControl\manifests\<operation>-<timestamp>.json` with
+  schema version, dry-run flag, firewall before/after, third-party AV list,
+  phases completed. `-Mode Manifest` prints the latest manifest; `-Json` emits
+  raw.
 
 ### Changed
 - Self-elevation now forwards all original arguments through the UAC re-launch
