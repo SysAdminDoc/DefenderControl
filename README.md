@@ -91,9 +91,36 @@ powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Health 
 powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Help
 ```
 
-**Exit codes:** `0` success, `1` partial, `2` blocked by Tamper Protection, `3` Safe Mode required, `4` usage / OS error.
+**Exit codes:** `0` success, `1` partial, `2` blocked by Tamper Protection, `3` Safe Mode required, `4` usage / OS error, `5` verification failure.
 
-`-Mode Disable` and `-Mode Enable` are reserved — use the GUI for mutating operations. Read-only Status / Health / Verify modes are CLI-safe.
+`-Mode Disable` and `-Mode Enable` are reserved — use the GUI for mutating operations. Read-only Status / Health / Verify / Manifest modes are CLI-safe.
+
+> **Note on elevation:** all CLI modes require Administrator privileges. If you invoke the script from a non-elevated shell, it re-launches in a new UAC-elevated window and the CLI output appears there, not in your calling shell. For automation pipelines, elevate the calling shell once (`Start-Process powershell -Verb RunAs`) and then invoke the script normally so stdout/stderr return to the caller.
+
+### Verify Mode
+
+```powershell
+# Assert Defender is fully enabled (exit 0 PASS, exit 5 FAIL, exit 2 if Tamper blocked)
+powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Verify -Expect Enabled
+
+# Assert Defender is fully disabled after a Disable run
+powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Verify -Expect Disabled
+
+# Opt-in synthetic detection test (writes a harmless EICAR test file, waits 2.5s, cleans up)
+powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Verify -Expect Enabled -Eicar -Force
+
+# JSON shape for automation: { expectation, overall, failCount, checks[] }
+powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Verify -Json
+```
+
+### Undo / Audit Manifests
+
+Every Disable and Enable run writes a JSON audit manifest to `%ProgramData%\DefenderControl\manifests\<operation>-<timestamp>.json` with firewall before/after snapshots, third-party AV detection, and the list of phases that ran. View the latest:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Manifest
+powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Manifest -Json
+```
 
 ---
 
