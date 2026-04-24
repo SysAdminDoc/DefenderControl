@@ -90,12 +90,17 @@ param(
     [ValidateSet('Disable','Enable','Status','Health','Verify','Manifest')]
     [string]$Mode,
 
+    [ValidateSet('Enabled','Disabled','Auto')]
+    [string]$Expect = 'Auto',
+
     [switch]$DryRun,
     [switch]$Silent,
     [switch]$Json,
     [switch]$Help,
     [switch]$NoRestorePoint,
-    [switch]$NoReboot
+    [switch]$NoReboot,
+    [switch]$Eicar,
+    [switch]$Force
 )
 
 # ==================================================================================
@@ -106,6 +111,7 @@ $script:EXIT_PARTIAL        = 1
 $script:EXIT_TAMPER_BLOCKED = 2
 $script:EXIT_SAFEMODE       = 3
 $script:EXIT_USAGE          = 4
+$script:EXIT_VERIFY_FAIL    = 5
 
 $script:IsCliMode = [bool]$Mode -or $Help.IsPresent
 
@@ -123,6 +129,13 @@ Defender Control - CLI Usage
     DefenderControl.ps1 -Mode Health -Json       Extended state as JSON
     DefenderControl.ps1 -Mode Manifest            Print the latest undo manifest
     DefenderControl.ps1 -Mode Manifest -Json      Latest manifest as JSON
+    DefenderControl.ps1 -Mode Verify              Assert Defender state matches
+                                                  an expected shape (auto-inferred)
+    DefenderControl.ps1 -Mode Verify -Expect Enabled   Assert fully enabled
+    DefenderControl.ps1 -Mode Verify -Expect Disabled  Assert fully disabled
+    DefenderControl.ps1 -Mode Verify -Eicar -Force     Include EICAR detection test
+                                                       (writes + cleans a harmless
+                                                       AV-signature test file)
     DefenderControl.ps1 -Help                    Show this usage
 
 Flags:
@@ -130,9 +143,13 @@ Flags:
     -DryRun         Simulate without applying (GUI + CLI)
     -NoRestorePoint Skip restore-point creation (CLI-only)
     -NoReboot       Suppress reboot prompt (CLI-only)
+    -Expect         Verify assertion target: Enabled | Disabled | Auto (default)
+    -Eicar          Opt-in EICAR synthetic detection test (Verify-only)
+    -Force          Required with -Eicar to actually write the test file
 
 Exit codes:
-    0 success   1 partial   2 tamper-blocked   3 safe-mode-needed   4 usage-error
+    0 success   1 partial   2 tamper-blocked   3 safe-mode-needed
+    4 usage-error   5 verify-fail
 
 Note: -Mode Disable|Enable are reserved; use the GUI for mutating operations.
 '@
@@ -407,18 +424,146 @@ function Write-CliLine {
     else { [Console]::Out.WriteLine($Text) }
 }
 
+function Invoke-VerifyMode {
+    param(
+        [string]$Expect = 'Auto',
+        [switch]$Json,
+        [switch]$Eicar,
+        [switch]$Force
+    )
+
+    $state = Get-DefenderState -Extended
+
+    # Auto: infer expectation from current effective state
+    $expectResolved = $Expect
+    if ($expectResolved -eq 'Auto') {
+        $expectResolved = if ($state.DefenderEffectivelyEnabled) { 'Enabled' } else { 'Disabled' }
+    }
+
+    $checks = New-Object System.Collections.Generic.List[hashtable]
+    function _check([string]$name, $expected, $actual) {
+        $result = if ($null -eq $expected -or $expected -eq $actual) { 'PASS' } else { 'FAIL' }
+        $checks.Add([ordered]@{
+            name     = $name
+            expected = $expected
+            actual   = $actual
+            result   = $result
+        }) | Out-Null
+    }
+
+    if ($expectResolved -eq 'Enabled') {
+        _check 'RealTimeProtectionEnabled' $true  $state.RealTimeProtectionEnabled
+        _check 'AntivirusEnabled'          $true  $state.AntivirusEnabled
+        _check 'AntispywareEnabled'        $true  $state.AntispywareEnabled
+        _check 'WinDefendRunning'          'Running'   $state.WinDefendStatus
+        _check 'WinDefendNotDisabled'      $true  ($state.WinDefendStartType -ne 'Disabled')
+        _check 'NoGroupPolicyDisable'      $true  ($state.PolicyDisableAntiSpyware -ne 1)
+    } else {
+        # 'Disabled' expectation — any of these signals successful disable
+        $anyDisabled = (
+            $state.RealTimeProtectionEnabled -eq $false -or
+            $state.AntivirusEnabled -eq $false -or
+            $state.WinDefendStatus -eq 'Stopped' -or
+            $state.WinDefendStartType -eq 'Disabled' -or
+            $state.PolicyDisableAntiSpyware -eq 1
+        )
+        _check 'DefenderEffectivelyDisabled' $true $anyDisabled
+        _check 'WinDefendServiceStatus'      $null $state.WinDefendStatus
+        _check 'WinDefendStartType'          $null $state.WinDefendStartType
+        _check 'PolicyDisableAntiSpyware'    $null $state.PolicyDisableAntiSpyware
+    }
+
+    # Optional: EICAR synthetic detection test
+    if ($Eicar.IsPresent) {
+        $eicarCheck = [ordered]@{ name = 'EicarSyntheticDetection'; expected = $null; actual = $null; result = 'SKIP' }
+        if (-not $Force.IsPresent) {
+            $eicarCheck.actual = 'not-run (add -Force to perform test)'
+            $eicarCheck.result = 'SKIP'
+        } elseif ($expectResolved -ne 'Enabled') {
+            $eicarCheck.actual = 'skipped (Defender expected disabled; EICAR test only valid when enabled)'
+            $eicarCheck.result = 'SKIP'
+        } else {
+            # Write EICAR standard test string, wait briefly, check if it got quarantined.
+            # This string is split across chars so the script itself doesn't trip AV on disk.
+            $eicarStr = 'X5O!P%@AP' + '[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H' + '*'
+            $tempDir  = Join-Path $env:TEMP 'DefenderControl-Verify'
+            try { if (-not (Test-Path $tempDir)) { New-Item -Path $tempDir -ItemType Directory -Force | Out-Null } } catch {}
+            $eicarPath = Join-Path $tempDir ("eicar-" + [guid]::NewGuid().ToString('N') + '.com')
+            try {
+                [System.IO.File]::WriteAllText($eicarPath, $eicarStr, [System.Text.Encoding]::ASCII)
+                Start-Sleep -Milliseconds 2500
+                $eicarStillThere = Test-Path -LiteralPath $eicarPath
+                if (-not $eicarStillThere) {
+                    $eicarCheck.actual = 'quarantined (Defender detected + removed EICAR test file)'
+                    $eicarCheck.result = 'PASS'
+                } else {
+                    $eicarCheck.actual = 'still-present (Defender did NOT detect EICAR within 2.5s)'
+                    $eicarCheck.result = 'FAIL'
+                    try { Remove-Item -LiteralPath $eicarPath -Force -ErrorAction SilentlyContinue } catch {}
+                }
+            } catch {
+                $eicarCheck.actual = "write-failed: $($_.Exception.Message)"
+                $eicarCheck.result = 'SKIP'
+            } finally {
+                # Best-effort cleanup (if Defender didn't quarantine, or we errored)
+                try { if (Test-Path -LiteralPath $eicarPath) { Remove-Item -LiteralPath $eicarPath -Force -ErrorAction SilentlyContinue } } catch {}
+                try { if ((Get-ChildItem -Path $tempDir -ErrorAction SilentlyContinue).Count -eq 0) {
+                    Remove-Item -Path $tempDir -Force -Recurse -ErrorAction SilentlyContinue
+                } } catch {}
+            }
+        }
+        $checks.Add($eicarCheck) | Out-Null
+    }
+
+    $failCount  = @($checks | Where-Object { $_.result -eq 'FAIL' }).Count
+    $overall    = if ($failCount -eq 0) { 'PASS' } else { 'FAIL' }
+
+    $report = [ordered]@{
+        timestamp         = (Get-Date).ToString('o')
+        host              = $env:COMPUTERNAME
+        expectation       = $expectResolved
+        expectationSource = $Expect
+        tamperProtected   = $state.IsTamperProtected
+        overall           = $overall
+        failCount         = $failCount
+        checks            = @($checks)
+    }
+
+    if ($Json.IsPresent) {
+        [Console]::Out.WriteLine(($report | ConvertTo-Json -Depth 6))
+    } else {
+        Write-CliLine ("Defender Control Verify - expect: {0} (source: {1})" -f $report.expectation, $report.expectationSource)
+        Write-CliLine ("Overall: {0}  FailCount: {1}  TamperProtected: {2}" -f $report.overall, $report.failCount, $report.tamperProtected)
+        Write-CliLine '---'
+        foreach ($c in $checks) {
+            $mark = switch ($c.result) { 'PASS' { 'PASS' }; 'FAIL' { 'FAIL' }; 'SKIP' { 'SKIP' } }
+            Write-CliLine ("  [{0}] {1,-30} expected={2}  actual={3}" -f $mark, $c.name, $c.expected, $c.actual)
+        }
+    }
+
+    if ($state.IsTamperProtected -eq $true) { exit $script:EXIT_TAMPER_BLOCKED }
+    if ($overall -eq 'PASS') { exit $script:EXIT_OK } else { exit $script:EXIT_VERIFY_FAIL }
+}
+
 function Invoke-CliMode {
     param(
         [string]$Mode,
+        [string]$Expect = 'Auto',
         [switch]$Json,
-        [switch]$Silent
+        [switch]$Silent,
+        [switch]$Eicar,
+        [switch]$Force
     )
 
     $script:Silent = $Silent.IsPresent
 
     switch ($Mode) {
-        { $_ -in 'Status','Health','Verify' } {
-            $extended = ($_ -in 'Health','Verify')
+        'Verify' {
+            Invoke-VerifyMode -Expect $Expect -Json:$Json -Eicar:$Eicar -Force:$Force
+            exit $script:EXIT_USAGE # defensive
+        }
+        { $_ -in 'Status','Health' } {
+            $extended = ($_ -eq 'Health')
             $state    = Get-DefenderState -Extended:$extended
 
             if ($Json.IsPresent) {
@@ -522,7 +667,7 @@ function Invoke-CliMode {
 }
 
 if ($script:IsCliMode) {
-    Invoke-CliMode -Mode $Mode -Json:$Json -Silent:$Silent
+    Invoke-CliMode -Mode $Mode -Expect $Expect -Json:$Json -Silent:$Silent -Eicar:$Eicar -Force:$Force
     # Invoke-CliMode always exits; defensive fall-through:
     exit $script:EXIT_USAGE
 }

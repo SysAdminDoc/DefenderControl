@@ -25,6 +25,18 @@ All notable changes to DefenderControl will be documented in this file.
   schema version, dry-run flag, firewall before/after, third-party AV list,
   phases completed. `-Mode Manifest` prints the latest manifest; `-Json` emits
   raw.
+- **Verification suite**: `-Mode Verify` is now a pass/fail assertion pass
+  rather than a Health alias. `-Expect Enabled` asserts RTP/AV/service/GP match
+  the "fully enabled" shape; `-Expect Disabled` asserts at least one signal
+  confirms disable; `-Expect Auto` (default) infers from current effective
+  state. JSON output shape:
+  `{expectation, overall, failCount, checks: [{name, expected, actual, result}]}`.
+- **EICAR synthetic detection test**: opt-in via `-Mode Verify -Eicar -Force`.
+  Writes the standard EICAR AV-signature test string to a GUID-keyed file under
+  `$env:TEMP\DefenderControl-Verify`, waits 2.5s, and reports whether Defender
+  quarantined it. The check is gated behind `-Force` and the path is always
+  cleaned up on exit.
+- New exit code `5` for verification failure (distinct from `1` partial).
 
 ### Changed
 - Self-elevation now forwards all original arguments through the UAC re-launch
