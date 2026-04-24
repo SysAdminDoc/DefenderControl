@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Defender Control v3.2.0 - Comprehensive Microsoft Defender Disable/Enable Utility
+    Defender Control v3.2.1 - Comprehensive Microsoft Defender Disable/Enable Utility
 
 .DESCRIPTION
     Professional WPF GUI + CLI tool to fully disable or re-enable Microsoft Defender
@@ -158,27 +158,77 @@ Note: -Mode Disable|Enable are reserved; use the GUI for mutating operations.
 }
 
 # ==================================================================================
+#  ARG-FORWARD HELPER (reused by both edition-rehost and self-elevation)
+# ==================================================================================
+function Get-ForwardedArgString {
+    $fwd = New-Object System.Collections.Generic.List[string]
+    foreach ($kv in $PSBoundParameters.GetEnumerator()) {
+        $name = $kv.Key
+        $val  = $kv.Value
+        if ($val -is [System.Management.Automation.SwitchParameter]) {
+            if ($val.IsPresent) { $fwd.Add("-$name") | Out-Null }
+        } else {
+            $fwd.Add("-$name") | Out-Null
+            $fwd.Add('"' + ($val -replace '"','\"') + '"') | Out-Null
+        }
+    }
+    $base = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
+    if ($fwd.Count -gt 0) { return $base + " " + ($fwd -join ' ') }
+    return $base
+}
+
+# ==================================================================================
+#  POWERSHELL EDITION CHECK -- auto-relaunch under Windows PowerShell 5.1
+# ==================================================================================
+# WPF (PresentationFramework) requires Windows PowerShell 5.1; PS 7 / Core does
+# not ship it on all installs. Instead of erroring out, we silently re-spawn
+# the script under powershell.exe (WinPS 5.1), preserving all original args.
+if ($PSVersionTable.PSEdition -eq 'Core') {
+    $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator)
+    $argList = Get-ForwardedArgString
+    $winPs = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    if (-not (Test-Path $winPs)) { $winPs = 'powershell.exe' }  # fall back to PATH
+
+    try {
+        if ($script:IsCliMode) {
+            # CLI: wait synchronously so stdout/stderr + exit code return to caller.
+            $spArgs = @{
+                FilePath     = $winPs
+                ArgumentList = $argList
+                Wait         = $true
+                PassThru     = $true
+                NoNewWindow  = $true
+            }
+            if (-not $isAdmin) { $spArgs.Remove('NoNewWindow'); $spArgs['Verb'] = 'RunAs' }
+            $proc = Start-Process @spArgs
+            exit $proc.ExitCode
+        } else {
+            # GUI: fire-and-forget new window
+            $spArgs = @{ FilePath = $winPs; ArgumentList = $argList }
+            if (-not $isAdmin) { $spArgs['Verb'] = 'RunAs' }
+            Start-Process @spArgs
+        }
+    } catch {
+        if ($script:IsCliMode) {
+            [Console]::Error.WriteLine("DefenderControl: requires Windows PowerShell 5.1 and $winPs could not be launched: $($_.Exception.Message)")
+            exit $script:EXIT_USAGE
+        }
+        Add-Type -AssemblyName PresentationFramework
+        [System.Windows.MessageBox]::Show(
+            "This tool requires Windows PowerShell 5.1.`n`nCould not auto-launch powershell.exe.`n`nManual: powershell.exe -File `"$PSCommandPath`"",
+            "Could not re-launch under Windows PowerShell", "OK", "Error") | Out-Null
+    }
+    exit
+}
+
+# ==================================================================================
 #  SELF-ELEVATION (forwards original args so CLI mode survives UAC re-launch)
 # ==================================================================================
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)) {
 
-    # Rebuild the original argument list from $PSBoundParameters so
-    # switches/values survive the UAC re-launch.
-    $forwardedArgs = New-Object System.Collections.Generic.List[string]
-    foreach ($kv in $PSBoundParameters.GetEnumerator()) {
-        $name = $kv.Key
-        $val  = $kv.Value
-        if ($val -is [System.Management.Automation.SwitchParameter]) {
-            if ($val.IsPresent) { $forwardedArgs.Add("-$name") | Out-Null }
-        } else {
-            $forwardedArgs.Add("-$name") | Out-Null
-            $forwardedArgs.Add('"' + ($val -replace '"','\"') + '"') | Out-Null
-        }
-    }
-    $argList = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
-    if ($forwardedArgs.Count -gt 0) { $argList += " " + ($forwardedArgs -join ' ') }
-
+    $argList = Get-ForwardedArgString
     try {
         Start-Process powershell.exe -ArgumentList $argList -Verb RunAs
     } catch {
@@ -202,7 +252,7 @@ if (-not $script:IsCliMode) {
     Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
 }
 
-$script:Version    = "3.2.0"
+$script:Version    = "3.2.1"
 $script:DryRun     = [bool]$DryRun
 $script:ShowVerbose = $true
 
@@ -231,17 +281,8 @@ if ($script:OSBuild -lt 17763 -and -not $script:IsCliMode) {
         "Old Windows Build", "OK", "Warning") | Out-Null
 }
 
-# Check PowerShell edition
-if ($PSVersionTable.PSEdition -eq 'Core') {
-    if ($script:IsCliMode) {
-        [Console]::Error.WriteLine("DefenderControl: requires Windows PowerShell 5.1 (not PowerShell 7+). Run with powershell.exe, not pwsh.")
-        exit $script:EXIT_USAGE
-    }
-    [System.Windows.MessageBox]::Show(
-        "This tool requires Windows PowerShell 5.1 (not PowerShell 7+).`n`nPlease run with: powershell.exe -File `"$PSCommandPath`"",
-        "Wrong PowerShell Edition", "OK", "Error") | Out-Null
-    exit
-}
+# PowerShell edition check happened earlier (auto-relaunches under WinPS 5.1).
+# By this point we are guaranteed to be on Windows PowerShell 5.1.
 
 # ==================================================================================
 #  CLI MODE: read-only state enumeration + dispatch
