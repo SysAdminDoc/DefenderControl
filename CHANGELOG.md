@@ -4,6 +4,8 @@ All notable changes to DefenderControl will be documented in this file.
 
 ## Unreleased
 
+## [v3.2.0] - 2026-04-24
+
 ### Added
 - CLI mode with `-Mode Status|Health|Verify|Manifest` for read-only state
 - `-Json` flag emits stable JSON (single object) for automation pipelines
