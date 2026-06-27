@@ -6,7 +6,9 @@ CLAUDE.md
 CODEX_CHANGELOG.md
 .claude/
 .codex/
-.factory/
+.factory/*
+!.factory/build-release.ps1
+dist/
 
 # Markdown files local-only (except README)
 *.md

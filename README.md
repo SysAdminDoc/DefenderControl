@@ -4,6 +4,7 @@ A professional PowerShell WPF utility to comprehensively disable or re-enable Mi
 
 ![PowerShell](https://img.shields.io/badge/PowerShell-5.1-blue?logo=powershell&logoColor=white)
 ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?logo=windows&logoColor=white)
+![Version](https://img.shields.io/badge/Version-v3.3.0-informational)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 ---
@@ -36,6 +37,9 @@ Defender Control performs a thorough multi-phase disable that persists across re
 - **Firewall Integrity Guard** — Snapshots firewall profile state + mpssvc/BFE service state before Phase 1; verifies no divergence after Phase 10
 - **Third-Party AV Pre-Flight** — Warns via Security Center WMI when no non-Microsoft AV is registered before disabling
 - **Undo / Audit Manifest** — Every Disable/Enable writes a JSON audit record to `%ProgramData%\DefenderControl\manifests\`; view with `-Mode Manifest`
+- **PPL Status Dashboard** — Shows current Protected Process Light state for WinDefend, WdFilter/WdBoot, and WdNisDrv
+- **Event Log Source** — Writes Disable/Enable start and completion events to the Windows Application log under `DefenderControl`
+- **Atomic Undo Replay** — Records registry before/after values in manifests and replays the latest Disable manifest during Enable
 
 ---
 
@@ -122,6 +126,16 @@ powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Manifes
 powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Manifest -Json
 ```
 
+### Portable Release ZIP
+
+Build the local release asset from the repository root:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".factory\build-release.ps1"
+```
+
+The build cleans `dist\`, creates `dist\DefenderControl-v3.3.0.zip` containing `DefenderControl.ps1`, `README.md`, and `LICENSE`, then writes release checksums to `dist\SHA256SUMS.txt`.
+
 ---
 
 ## What It Does
@@ -188,7 +202,7 @@ The log shows exactly which method succeeded for each key.
 
 - **Checkpoint-Computer** (System Restore) is throttled to one restore point per 24 hours by Windows. If one was created recently, the tool logs a warning and continues.
 
-- **Some heavily locked service keys** may resist all 4 escalation methods. In this case, the only remaining option is Safe Mode, which is outside the scope of this tool.
+- **Some heavily locked service keys** may resist all 4 escalation methods. In this case, use a controlled Safe Mode maintenance window.
 
 ---
 

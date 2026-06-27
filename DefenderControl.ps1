@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Defender Control v3.2.1 - Comprehensive Microsoft Defender Disable/Enable Utility
+    Defender Control v3.3.0 - Comprehensive Microsoft Defender Disable/Enable Utility
 
 .DESCRIPTION
     Professional WPF GUI + CLI tool to fully disable or re-enable Microsoft Defender
@@ -18,7 +18,7 @@
       - Live status dashboard showing all Defender component states
       - Tamper Protection detection with step-by-step disable guidance
       - Scheduled re-enable: auto re-enable Defender after 1-24 hours
-      - CLI: read-only Status / Health modes with JSON output for automation
+      - CLI: read-only Status / Health / Verify / Manifest modes with JSON output
 
     WHAT THIS TOOL DOES NOT DO:
       - Does NOT touch Windows Firewall (completely unaffected)
@@ -44,7 +44,7 @@
     When supplied, runs in CLI (no-GUI) mode. Values:
       Status  - read-only snapshot of Defender state (exit 0)
       Health  - extended read-only enumeration (services, PPL, tasks, policy keys)
-      Verify  - same as Health plus a post-disable sanity check (alias for now)
+      Verify  - pass/fail assertion against enabled or disabled Defender state
       Disable - reserved (CLI disable not yet implemented; use GUI)
       Enable  - reserved (CLI enable not yet implemented; use GUI)
 
@@ -78,6 +78,7 @@
       2 - blocked by Tamper Protection
       3 - Safe Mode required for the requested operation
       4 - usage error / unsupported OS / missing elevation
+      5 - verification failure
 
 .LINK
     https://github.com/SysAdminDoc/DefenderControl
@@ -252,7 +253,7 @@ if (-not $script:IsCliMode) {
     Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
 }
 
-$script:Version    = "3.2.1"
+$script:Version    = "3.3.0"
 $script:DryRun     = [bool]$DryRun
 $script:ShowVerbose = $true
 
@@ -283,6 +284,33 @@ if ($script:OSBuild -lt 17763 -and -not $script:IsCliMode) {
 
 # PowerShell edition check happened earlier (auto-relaunches under WinPS 5.1).
 # By this point we are guaranteed to be on Windows PowerShell 5.1.
+
+# ==================================================================================
+#  EVENT LOG SOURCE (for SIEM integration)
+# ==================================================================================
+$script:EventLogSource = 'DefenderControl'
+$script:EventLogName   = 'Application'
+try {
+    if (-not [System.Diagnostics.EventLog]::SourceExists($script:EventLogSource)) {
+        [System.Diagnostics.EventLog]::CreateEventSource($script:EventLogSource, $script:EventLogName)
+    }
+    $script:EventLogReady = $true
+} catch {
+    # Non-fatal — event logging is best-effort
+    $script:EventLogReady = $false
+}
+
+function Write-DefenderControlEvent {
+    param(
+        [string]$Message,
+        [int]$EventId = 1000,
+        [System.Diagnostics.EventLogEntryType]$EntryType = [System.Diagnostics.EventLogEntryType]::Information
+    )
+    if (-not $script:EventLogReady) { return }
+    try {
+        [System.Diagnostics.EventLog]::WriteEntry($script:EventLogSource, $Message, $EntryType, $EventId)
+    } catch {}
+}
 
 # ==================================================================================
 #  CLI MODE: read-only state enumeration + dispatch
@@ -999,6 +1027,7 @@ try {
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
                     <!-- Row 0 -->
@@ -1029,8 +1058,22 @@ try {
                         <TextBlock x:Name="dashAntiSpy" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
                     </StackPanel>
 
-                    <!-- Row 2 -->
-                    <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,0,12,0">
+                    <!-- Row 2: PPL Status -->
+                    <StackPanel Grid.Row="2" Grid.Column="0" Margin="0,0,12,6">
+                        <TextBlock Text="PPL: MsMpEng" FontSize="11" Foreground="{StaticResource TextDim}"/>
+                        <TextBlock x:Name="dashPplMsMpEng" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
+                    </StackPanel>
+                    <StackPanel Grid.Row="2" Grid.Column="1" Margin="0,0,12,6">
+                        <TextBlock Text="PPL: WdFilter / WdBoot" FontSize="11" Foreground="{StaticResource TextDim}"/>
+                        <TextBlock x:Name="dashPplWdFilter" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
+                    </StackPanel>
+                    <StackPanel Grid.Row="2" Grid.Column="2" Margin="0,0,12,6">
+                        <TextBlock Text="PPL: WdNisDrv" FontSize="11" Foreground="{StaticResource TextDim}"/>
+                        <TextBlock x:Name="dashPplWdNisDrv" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
+                    </StackPanel>
+
+                    <!-- Row 3 -->
+                    <StackPanel Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,0,12,0">
                         <TextBlock Text="Last Definition Update" FontSize="11" Foreground="{StaticResource TextDim}"/>
                         <TextBlock x:Name="dashDefUpdate" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
                     </StackPanel>
@@ -1187,7 +1230,10 @@ $dashCloud     = $window.FindName("dashCloud")
 $dashFirewall  = $window.FindName("dashFirewall")
 $dashService   = $window.FindName("dashService")
 $dashAntiSpy   = $window.FindName("dashAntiSpy")
-$dashDefUpdate = $window.FindName("dashDefUpdate")
+$dashDefUpdate  = $window.FindName("dashDefUpdate")
+$dashPplMsMpEng = $window.FindName("dashPplMsMpEng")
+$dashPplWdFilter = $window.FindName("dashPplWdFilter")
+$dashPplWdNisDrv = $window.FindName("dashPplWdNisDrv")
 $btnRefreshDash = $window.FindName("btnRefreshDash")
 
 # Tamper Protection warning panel
@@ -1243,6 +1289,9 @@ function Queue-Dashboard {
           [string]$Service, [string]$ServiceColor,
           [string]$AntiSpy, [string]$AntiSpyColor,
           [string]$DefUpdate, [string]$DefUpdateColor,
+          [string]$PplMsMpEng = "--", [string]$PplMsMpEngColor = "#7f8c8d",
+          [string]$PplWdFilter = "--", [string]$PplWdFilterColor = "#7f8c8d",
+          [string]$PplWdNisDrv = "--", [string]$PplWdNisDrvColor = "#7f8c8d",
           [bool]$ShowTamperWarning = $false)
     $script:DashQueue.Enqueue(@{
         RTP = $RTP; RTPColor = $RTPColor
@@ -1252,6 +1301,9 @@ function Queue-Dashboard {
         Service = $Service; ServiceColor = $ServiceColor
         AntiSpy = $AntiSpy; AntiSpyColor = $AntiSpyColor
         DefUpdate = $DefUpdate; DefUpdateColor = $DefUpdateColor
+        PplMsMpEng = $PplMsMpEng; PplMsMpEngColor = $PplMsMpEngColor
+        PplWdFilter = $PplWdFilter; PplWdFilterColor = $PplWdFilterColor
+        PplWdNisDrv = $PplWdNisDrv; PplWdNisDrvColor = $PplWdNisDrvColor
         ShowTamperWarning = $ShowTamperWarning
     })
 }
@@ -1334,6 +1386,18 @@ $script:uiTimer.Add_Tick({
         $dashAntiSpy.Foreground = $bc.ConvertFromString($dsh.AntiSpyColor)
         $dashDefUpdate.Text = $dsh.DefUpdate
         $dashDefUpdate.Foreground = $bc.ConvertFromString($dsh.DefUpdateColor)
+        if ($dsh.PplMsMpEng) {
+            $dashPplMsMpEng.Text = $dsh.PplMsMpEng
+            $dashPplMsMpEng.Foreground = $bc.ConvertFromString($dsh.PplMsMpEngColor)
+        }
+        if ($dsh.PplWdFilter) {
+            $dashPplWdFilter.Text = $dsh.PplWdFilter
+            $dashPplWdFilter.Foreground = $bc.ConvertFromString($dsh.PplWdFilterColor)
+        }
+        if ($dsh.PplWdNisDrv) {
+            $dashPplWdNisDrv.Text = $dsh.PplWdNisDrv
+            $dashPplWdNisDrv.Foreground = $bc.ConvertFromString($dsh.PplWdNisDrvColor)
+        }
         if ($dsh.ShowTamperWarning) {
             $tamperWarningPanel.Visibility = "Visible"
             $btnDisable.ToolTip = "Tamper Protection must be disabled first. See the warning panel below for instructions."
@@ -1379,6 +1443,9 @@ function Queue-Dashboard {
           [string]`$Service, [string]`$ServiceColor,
           [string]`$AntiSpy, [string]`$AntiSpyColor,
           [string]`$DefUpdate, [string]`$DefUpdateColor,
+          [string]`$PplMsMpEng = "--", [string]`$PplMsMpEngColor = "#7f8c8d",
+          [string]`$PplWdFilter = "--", [string]`$PplWdFilterColor = "#7f8c8d",
+          [string]`$PplWdNisDrv = "--", [string]`$PplWdNisDrvColor = "#7f8c8d",
           [bool]`$ShowTamperWarning = `$false)
     `$DashQueue.Enqueue(@{
         RTP = `$RTP; RTPColor = `$RTPColor
@@ -1388,36 +1455,54 @@ function Queue-Dashboard {
         Service = `$Service; ServiceColor = `$ServiceColor
         AntiSpy = `$AntiSpy; AntiSpyColor = `$AntiSpyColor
         DefUpdate = `$DefUpdate; DefUpdateColor = `$DefUpdateColor
+        PplMsMpEng = `$PplMsMpEng; PplMsMpEngColor = `$PplMsMpEngColor
+        PplWdFilter = `$PplWdFilter; PplWdFilterColor = `$PplWdFilterColor
+        PplWdNisDrv = `$PplWdNisDrv; PplWdNisDrvColor = `$PplWdNisDrvColor
         ShowTamperWarning = `$ShowTamperWarning
     })
 }
 function Set-RegValue {
     param([string]`$Path, [string]`$Name, `$Value, [string]`$Type = "DWord")
     if (`$DryRun) { Queue-Info "  [DRY RUN] Would set `$Path\`$Name = `$Value"; return `$true }
+    `$before = `$null
+    try { `$before = (Get-ItemProperty -Path `$Path -Name `$Name -ErrorAction SilentlyContinue).`$Name } catch {}
     try {
         if (-not (Test-Path `$Path)) { New-Item -Path `$Path -Force | Out-Null; Queue-Verbose "  Created key: `$Path" }
         Set-ItemProperty -Path `$Path -Name `$Name -Value `$Value -Type `$Type -Force -ErrorAction Stop
+        `$TxLog.Enqueue(@{ Time=(Get-Date).ToString('o'); Op='Set'; Path=`$Path; Name=`$Name; Before=`$before; After=`$Value; Type=`$Type; Success=`$true })
         return `$true
-    } catch { Queue-Err "  REG ERROR: `$Path\`$Name - `$_"; return `$false }
+    } catch {
+        `$TxLog.Enqueue(@{ Time=(Get-Date).ToString('o'); Op='Set'; Path=`$Path; Name=`$Name; Before=`$before; After=`$Value; Type=`$Type; Success=`$false; Error="`$_" })
+        Queue-Err "  REG ERROR: `$Path\`$Name - `$_"; return `$false
+    }
 }
 function Remove-RegValue {
     param([string]`$Path, [string]`$Name)
     if (`$DryRun) { Queue-Info "  [DRY RUN] Would remove `$Path\`$Name"; return `$true }
+    `$before = `$null
+    try { `$before = (Get-ItemProperty -Path `$Path -Name `$Name -ErrorAction SilentlyContinue).`$Name } catch {}
     try {
         if (Test-Path `$Path) {
             `$val = Get-ItemProperty -Path `$Path -Name `$Name -ErrorAction SilentlyContinue
             if (`$null -ne `$val.`$Name) { Remove-ItemProperty -Path `$Path -Name `$Name -Force -ErrorAction Stop }
         }
+        `$TxLog.Enqueue(@{ Time=(Get-Date).ToString('o'); Op='Remove'; Path=`$Path; Name=`$Name; Before=`$before; After=`$null; Success=`$true })
         return `$true
-    } catch { Queue-Err "  REG REMOVE ERROR: `$Path\`$Name - `$_"; return `$false }
+    } catch {
+        `$TxLog.Enqueue(@{ Time=(Get-Date).ToString('o'); Op='Remove'; Path=`$Path; Name=`$Name; Before=`$before; After=`$null; Success=`$false; Error="`$_" })
+        Queue-Err "  REG REMOVE ERROR: `$Path\`$Name - `$_"; return `$false
+    }
 }
 function Set-ProtectedRegValue {
     param([string]`$KeyPath, [string]`$ValueName, [int]`$Value)
     if (`$DryRun) { Queue-Info "  [DRY RUN] Would set `$KeyPath\`$ValueName = `$Value (protected)"; return `$true }
     `$fullPath = "HKLM:\`$KeyPath"
+    `$beforeVal = `$null
+    try { `$beforeVal = (Get-ItemProperty -Path `$fullPath -Name `$ValueName -ErrorAction SilentlyContinue).`$ValueName } catch {}
     # Attempt 1: Direct write
     try {
         Set-ItemProperty -Path `$fullPath -Name `$ValueName -Value `$Value -Type DWord -Force -ErrorAction Stop
+        `$TxLog.Enqueue(@{ Time=(Get-Date).ToString('o'); Op='SetProtected'; Path=`$fullPath; Name=`$ValueName; Before=`$beforeVal; After=`$Value; Method='Direct'; Success=`$true })
         return `$true
     } catch { Queue-Verbose "    Direct write failed for `$KeyPath\`$ValueName" }
     # Attempt 2: Take ownership + write via .NET handle
@@ -1448,6 +1533,7 @@ function Set-ProtectedRegValue {
                 `$regKey2.SetValue(`$ValueName, `$Value, [Microsoft.Win32.RegistryValueKind]::DWord)
                 `$regKey2.Close()
                 Queue-Verbose "    Wrote via .NET handle: `$ValueName = `$Value"
+                `$TxLog.Enqueue(@{ Time=(Get-Date).ToString('o'); Op='SetProtected'; Path=`$fullPath; Name=`$ValueName; Before=`$beforeVal; After=`$Value; Method='NETHandle'; Success=`$true })
                 return `$true
             }
         }
@@ -1458,6 +1544,7 @@ function Set-ProtectedRegValue {
         `$result = & reg.exe add `$regExePath /v `$ValueName /t REG_DWORD /d `$Value /f 2>&1
         if (`$LASTEXITCODE -eq 0) {
             Queue-Verbose "    Wrote via reg.exe: `$ValueName = `$Value"
+            `$TxLog.Enqueue(@{ Time=(Get-Date).ToString('o'); Op='SetProtected'; Path=`$fullPath; Name=`$ValueName; Before=`$beforeVal; After=`$Value; Method='RegExe'; Success=`$true })
             return `$true
         } else { Queue-Verbose "    reg.exe failed: `$result" }
     } catch { Queue-Verbose "    reg.exe exception: `$(`$_.Exception.Message)" }
@@ -1472,9 +1559,11 @@ function Set-ProtectedRegValue {
         `$check = (Get-ItemProperty -Path `$fullPath -Name `$ValueName -ErrorAction SilentlyContinue).`$ValueName
         if (`$check -eq `$Value) {
             Queue-Verbose "    Wrote via SYSTEM task: `$ValueName = `$Value"
+            `$TxLog.Enqueue(@{ Time=(Get-Date).ToString('o'); Op='SetProtected'; Path=`$fullPath; Name=`$ValueName; Before=`$beforeVal; After=`$Value; Method='SystemTask'; Success=`$true })
             return `$true
         }
     } catch { Queue-Verbose "    SYSTEM task failed: `$(`$_.Exception.Message)" }
+    `$TxLog.Enqueue(@{ Time=(Get-Date).ToString('o'); Op='SetProtected'; Path=`$fullPath; Name=`$ValueName; Before=`$beforeVal; After=`$Value; Method='AllFailed'; Success=`$false })
     Queue-Warn "    All methods failed for `$KeyPath\`$ValueName"
     return `$false
 }
@@ -1576,6 +1665,7 @@ function New-DefenderControlManifest {
         firewallDiffs   = @()
         thirdPartyAV    = @()
         phasesCompleted = @()
+        transactionLog  = @()
         finishedAt      = `$null
         path            = `$file
     }
@@ -1584,15 +1674,32 @@ function Save-DefenderControlManifest {
     param(`$Manifest)
     if (`$null -eq `$Manifest) { return `$null }
     `$Manifest.finishedAt = (Get-Date).ToString('o')
+    # Drain transaction log into manifest
+    `$txEntries = [System.Collections.ArrayList]::new()
+    `$txEntry = `$null
+    while (`$TxLog.TryDequeue([ref]`$txEntry)) { `$txEntries.Add(`$txEntry) | Out-Null }
+    `$Manifest.transactionLog = @(`$txEntries)
     try {
         `$json = (`$Manifest | ConvertTo-Json -Depth 8)
         [System.IO.File]::WriteAllText(`$Manifest.path, `$json, [System.Text.Encoding]::UTF8)
         Queue-Info "  Undo manifest saved: `$(`$Manifest.path)"
+        Queue-Info "  Transaction log: `$(`$txEntries.Count) registry operations recorded"
         return `$Manifest.path
     } catch {
         Queue-Warn "  Manifest save failed: `$(`$_.Exception.Message)"
         return `$null
     }
+}
+function Write-DefenderControlEvent {
+    param(
+        [string]`$Message,
+        [int]`$EventId = 1000,
+        [System.Diagnostics.EventLogEntryType]`$EntryType = [System.Diagnostics.EventLogEntryType]::Information
+    )
+    if (-not `$EventLogReady) { return }
+    try {
+        [System.Diagnostics.EventLog]::WriteEntry(`$EventLogSource, `$Message, `$EntryType, `$EventId)
+    } catch {}
 }
 "@
 
@@ -1619,6 +1726,11 @@ function Start-BackgroundWork {
     $runspace.SessionStateProxy.SetVariable("DashQueue",   $script:DashQueue)
     $runspace.SessionStateProxy.SetVariable("DryRun",      $script:DryRun)
     $runspace.SessionStateProxy.SetVariable("OSBuild",     $script:OSBuild)
+    $runspace.SessionStateProxy.SetVariable("EventLogReady",  $script:EventLogReady)
+    $runspace.SessionStateProxy.SetVariable("EventLogSource", $script:EventLogSource)
+    $txLog = [System.Collections.Concurrent.ConcurrentQueue[hashtable]]::new()
+    $runspace.SessionStateProxy.SetVariable("TxLog", $txLog)
+    $runspace.SessionStateProxy.SetVariable("TxLogRef", $txLog)
 
     $ps = [PowerShell]::Create()
     $ps.Runspace = $runspace
@@ -1780,6 +1892,46 @@ function Update-StatusAsync {
             $fwText = "Unknown"; $fwColor = "#7f8c8d"
         }
 
+        # PPL status per service
+        $pplMap = @{ 0 = 'None'; 1 = 'AuthenticodeLight'; 2 = 'WindowsLight'; 3 = 'Windows'; 4 = 'AntimalwareLight' }
+        $pplMsMpEngText = "--"; $pplMsMpEngColor = "#7f8c8d"
+        $pplWdFilterText = "--"; $pplWdFilterColor = "#7f8c8d"
+        $pplWdNisDrvText = "--"; $pplWdNisDrvColor = "#7f8c8d"
+
+        # MsMpEng (WinDefend service)
+        try {
+            $lp = (Get-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\WinDefend" -Name "LaunchProtected" -ErrorAction SilentlyContinue).LaunchProtected
+            if ($null -ne $lp) {
+                $label = if ($pplMap.ContainsKey([int]$lp)) { $pplMap[[int]$lp] } else { "Unknown($lp)" }
+                if ([int]$lp -gt 0) { $pplMsMpEngText = "Protected ($label)"; $pplMsMpEngColor = "#2ecc71" }
+                else { $pplMsMpEngText = "Stripped"; $pplMsMpEngColor = "#e74c3c" }
+            } else { $pplMsMpEngText = "Not Set"; $pplMsMpEngColor = "#7f8c8d" }
+        } catch {}
+        Queue-Verbose "  PPL WinDefend (MsMpEng): $pplMsMpEngText"
+
+        # WdFilter + WdBoot (combined tile)
+        try {
+            $lpFilter = (Get-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\WdFilter" -Name "LaunchProtected" -ErrorAction SilentlyContinue).LaunchProtected
+            $lpBoot   = (Get-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\WdBoot" -Name "LaunchProtected" -ErrorAction SilentlyContinue).LaunchProtected
+            $fVal = if ($null -ne $lpFilter) { [int]$lpFilter } else { -1 }
+            $bVal = if ($null -ne $lpBoot)   { [int]$lpBoot }   else { -1 }
+            if ($fVal -gt 0 -and $bVal -gt 0) { $pplWdFilterText = "Protected"; $pplWdFilterColor = "#2ecc71" }
+            elseif ($fVal -le 0 -and $bVal -le 0) { $pplWdFilterText = "Stripped"; $pplWdFilterColor = "#e74c3c" }
+            elseif ($fVal -eq -1 -and $bVal -eq -1) { $pplWdFilterText = "Not Set"; $pplWdFilterColor = "#7f8c8d" }
+            else { $pplWdFilterText = "Partial"; $pplWdFilterColor = "#e67e22" }
+        } catch {}
+        Queue-Verbose "  PPL WdFilter/WdBoot: $pplWdFilterText"
+
+        # WdNisDrv
+        try {
+            $lpNis = (Get-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\WdNisDrv" -Name "LaunchProtected" -ErrorAction SilentlyContinue).LaunchProtected
+            if ($null -ne $lpNis) {
+                if ([int]$lpNis -gt 0) { $pplWdNisDrvText = "Protected"; $pplWdNisDrvColor = "#2ecc71" }
+                else { $pplWdNisDrvText = "Stripped"; $pplWdNisDrvColor = "#e74c3c" }
+            } else { $pplWdNisDrvText = "Not Set"; $pplWdNisDrvColor = "#7f8c8d" }
+        } catch {}
+        Queue-Verbose "  PPL WdNisDrv: $pplWdNisDrvText"
+
         # Push dashboard update
         Queue-Dashboard -RTP $rtpText -RTPColor $rtpColor `
             -Tamper $tamperText -TamperColor $tamperColor `
@@ -1788,6 +1940,9 @@ function Update-StatusAsync {
             -Service $svcText -ServiceColor $svcColor `
             -AntiSpy $antiSpyText -AntiSpyColor $antiSpyColor `
             -DefUpdate $defUpdateText -DefUpdateColor $defUpdateColor `
+            -PplMsMpEng $pplMsMpEngText -PplMsMpEngColor $pplMsMpEngColor `
+            -PplWdFilter $pplWdFilterText -PplWdFilterColor $pplWdFilterColor `
+            -PplWdNisDrv $pplWdNisDrvText -PplWdNisDrvColor $pplWdNisDrvColor `
             -ShowTamperWarning $tamperOn
 
         # Push main status
@@ -1829,6 +1984,7 @@ function Invoke-DisableDefender {
         Queue-Info "============================================"
         Queue-Info "  DISABLING MICROSOFT DEFENDER"
         Queue-Info "============================================"
+        Write-DefenderControlEvent -Message "Defender Control: Disable operation started on $env:COMPUTERNAME (DryRun=$DryRun)" -EventId 1001
         Start-Sleep -Milliseconds 100
 
         # -- Phase 0: Safety pre-flight (firewall snapshot + third-party AV) ----------
@@ -2191,8 +2347,10 @@ function Invoke-DisableDefender {
         Queue-Info "============================================"
         if ($DryRun) {
             Queue-Info "  DRY RUN COMPLETE - No changes were made"
+            Write-DefenderControlEvent -Message "Defender Control: Disable dry-run completed on $env:COMPUTERNAME" -EventId 1002
         } else {
             Queue-Info "  DISABLE OPERATION COMPLETE"
+            Write-DefenderControlEvent -Message "Defender Control: Disable operation completed on $env:COMPUTERNAME" -EventId 1003
         }
         Queue-Info "============================================"
 
@@ -2211,6 +2369,7 @@ function Invoke-DisableDefender {
 
             if ($stillOn) {
                 Queue-Status -StatusText "PARTIALLY DISABLED" -StatusColor "#e67e22" -TamperText "Some components active - reboot or disable Tamper Protection" -TamperColor "#e67e22" -DisableBtn $true -EnableBtn $true -Progress 100 -RunningText "" -ShowReboot "show"
+                Write-DefenderControlEvent -Message "Defender Control: Disable partially successful on $env:COMPUTERNAME - some components still active" -EventId 1004 -EntryType ([System.Diagnostics.EventLogEntryType]::Warning)
             } else {
                 Queue-Status -StatusText "DISABLED" -StatusColor "#e74c3c" -TamperText "Reboot recommended" -TamperColor "#7f8c8d" -DisableBtn $false -EnableBtn $true -Progress 100 -RunningText "" -ShowReboot "show"
             }
@@ -2236,12 +2395,65 @@ function Invoke-EnableDefender {
         Queue-Info "============================================"
         Queue-Info "  RE-ENABLING MICROSOFT DEFENDER"
         Queue-Info "============================================"
+        Write-DefenderControlEvent -Message "Defender Control: Enable operation started on $env:COMPUTERNAME (DryRun=$DryRun)" -EventId 2001
         Start-Sleep -Milliseconds 100
 
-        # -- Phase 0: Firewall snapshot (for post-enable integrity check) --------------
+        # -- Phase 0: Firewall snapshot + undo manifest lookup --------------------------
         $fwBefore = Get-FirewallSnapshot
         if ($manifest) { $manifest.firewallBefore = $fwBefore }
         Queue-Verbose "Firewall snapshot captured ($($fwBefore.Count) fields)"
+
+        # Look for the latest Disable manifest to replay its transaction log
+        $undoManifest = $null
+        $undoTxLog = @()
+        $manifestDir = Join-Path $env:ProgramData 'DefenderControl\manifests'
+        if (Test-Path $manifestDir) {
+            $latestDisable = Get-ChildItem -Path $manifestDir -Filter 'Disable-*.json' -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if ($latestDisable) {
+                try {
+                    $undoManifest = Get-Content -Raw -Path $latestDisable.FullName -ErrorAction Stop | ConvertFrom-Json
+                    if ($undoManifest.transactionLog -and $undoManifest.transactionLog.Count -gt 0) {
+                        $undoTxLog = @($undoManifest.transactionLog)
+                        Queue-Info "  Undo manifest found: $($latestDisable.Name) ($($undoTxLog.Count) registry operations)"
+                    } else {
+                        Queue-Verbose "  Undo manifest found but has no transaction log"
+                    }
+                } catch {
+                    Queue-Verbose "  Could not parse undo manifest: $($_.Exception.Message)"
+                }
+            } else {
+                Queue-Verbose "  No prior Disable manifest found"
+            }
+        }
+
+        # Replay: restore registry values from transaction log where Before was captured
+        if ($undoTxLog.Count -gt 0) {
+            Queue-Phase "--- Undo Manifest Replay ---"
+            $replayCount = 0
+            $replayFail  = 0
+            foreach ($entry in $undoTxLog) {
+                if ($null -eq $entry.Before) { continue }  # no prior value to restore
+                if ($entry.Op -eq 'Remove') { continue }   # Remove ops had no value set
+                if (-not $entry.Path -or -not $entry.Name) { continue }
+                try {
+                    $regType = if ($entry.Type) { $entry.Type } else { 'DWord' }
+                    if ($DryRun) {
+                        Queue-Info "  [DRY RUN] Would restore $($entry.Path)\$($entry.Name) = $($entry.Before)"
+                    } else {
+                        if (-not (Test-Path $entry.Path)) { New-Item -Path $entry.Path -Force | Out-Null }
+                        Set-ItemProperty -Path $entry.Path -Name $entry.Name -Value $entry.Before -Type $regType -Force -ErrorAction Stop
+                    }
+                    $replayCount++
+                } catch {
+                    $replayFail++
+                    Queue-Verbose "  Replay failed: $($entry.Path)\$($entry.Name) - $($_.Exception.Message)"
+                }
+            }
+            Queue-Info "  Undo replay: $replayCount values restored, $replayFail failed"
+            if ($manifest) { $manifest['undoReplay'] = @{ source = $latestDisable.Name; restored = $replayCount; failed = $replayFail } }
+        }
+        Start-Sleep -Milliseconds 60
 
         # -- Phase 1: Remove Policy Overrides -------------------------------------------
         $phase++
@@ -2533,8 +2745,10 @@ function Invoke-EnableDefender {
         Queue-Info "============================================"
         if ($DryRun) {
             Queue-Info "  DRY RUN COMPLETE - No changes were made"
+            Write-DefenderControlEvent -Message "Defender Control: Enable dry-run completed on $env:COMPUTERNAME" -EventId 2002
         } else {
             Queue-Info "  ENABLE OPERATION COMPLETE"
+            Write-DefenderControlEvent -Message "Defender Control: Enable operation completed on $env:COMPUTERNAME" -EventId 2003
         }
         Queue-Info "============================================"
 
@@ -2546,6 +2760,7 @@ function Invoke-EnableDefender {
         } else {
             Queue-Warn "Reboot STRONGLY recommended to complete restoration."
             Queue-Status -StatusText "PENDING REBOOT" -StatusColor "#e67e22" -TamperText "Restart to complete" -TamperColor "#e67e22" -DisableBtn $true -EnableBtn $true -Progress 100 -RunningText "" -ShowReboot "show"
+            Write-DefenderControlEvent -Message "Defender Control: Enable completed on $env:COMPUTERNAME but reboot required" -EventId 2004 -EntryType ([System.Diagnostics.EventLogEntryType]::Warning)
         }
         Queue-Success "Done."
     }
