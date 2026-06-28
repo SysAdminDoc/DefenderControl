@@ -13,3 +13,9 @@ dist/
 # Markdown files local-only (except README)
 *.md
 !README.md
+
+# AI config
+AGENTS.md
+.ai/
+PROJECT_CONTEXT.md
+CONTINUATION_PROMPT.md
