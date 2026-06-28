@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Defender Control v3.3.1 - Comprehensive Microsoft Defender Disable/Enable Utility
+    Defender Control v3.3.2 - Comprehensive Microsoft Defender Disable/Enable Utility
 
 .DESCRIPTION
     Professional WPF GUI + CLI tool to fully disable or re-enable Microsoft Defender
@@ -253,7 +253,7 @@ if (-not $script:IsCliMode) {
     Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
 }
 
-$script:Version    = "3.3.1"
+$script:Version    = "3.3.2"
 $script:DryRun     = [bool]$DryRun
 $script:ShowVerbose = $true
 
@@ -1499,35 +1499,132 @@ function Queue-Dashboard {
         ShowTamperWarning = `$ShowTamperWarning
     })
 }
+function Get-TxField {
+    param(`$Entry, [string]`$Name, `$Default = `$null)
+    if (`$Entry -is [System.Collections.IDictionary]) {
+        if (`$Entry.Contains(`$Name)) { return `$Entry[`$Name] }
+    }
+    `$prop = `$Entry.PSObject.Properties[`$Name]
+    if (`$prop) { return `$prop.Value }
+    return `$Default
+}
+function Get-RegValueSnapshot {
+    param([string]`$Path, [string]`$Name)
+    `$snapshot = [ordered]@{ PathExists = `$false; Exists = `$false; Value = `$null; Type = `$null }
+    try {
+        if (Test-Path -LiteralPath `$Path) {
+            `$snapshot.PathExists = `$true
+            `$key = Get-Item -LiteralPath `$Path -ErrorAction Stop
+            if (@(`$key.GetValueNames()) -contains `$Name) {
+                `$snapshot.Exists = `$true
+                `$snapshot.Value = `$key.GetValue(`$Name, `$null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+                `$snapshot.Type = "`$(`$key.GetValueKind(`$Name))"
+            }
+        }
+    } catch {}
+    return `$snapshot
+}
+function Convert-ProviderPathToLocalMachineKey {
+    param([string]`$Path)
+    if (`$Path -like 'HKLM:\*') { return `$Path.Substring(6) }
+    return `$null
+}
+function Restore-RegValueForReplay {
+    param(`$Entry, [bool]`$BeforeExists, `$BeforeValue, [string]`$BeforeType)
+    `$path = Get-TxField `$Entry 'Path'
+    `$name = Get-TxField `$Entry 'Name'
+    `$op = Get-TxField `$Entry 'Op'
+    if (-not `$path -or -not `$name) { return 'Skipped' }
+
+    if (`$BeforeExists) {
+        `$regType = if (`$BeforeType) { `$BeforeType } elseif (Get-TxField `$Entry 'Type') { Get-TxField `$Entry 'Type' } else { 'DWord' }
+        if (`$DryRun) {
+            Queue-Info "  [DRY RUN] Would restore `$path\`$name = `$BeforeValue (`$regType)"
+            return 'Restored'
+        }
+        try {
+            if (-not (Test-Path -LiteralPath `$path)) { New-Item -Path `$path -Force | Out-Null }
+            Set-ItemProperty -LiteralPath `$path -Name `$name -Value `$BeforeValue -Type `$regType -Force -ErrorAction Stop
+            return 'Restored'
+        } catch {
+            if (`$op -eq 'SetProtected' -and `$regType -eq 'DWord') {
+                `$keyPath = Convert-ProviderPathToLocalMachineKey -Path `$path
+                if (`$keyPath -and (Set-ProtectedRegValue -KeyPath `$keyPath -ValueName `$name -Value ([int]`$BeforeValue))) {
+                    return 'Restored'
+                }
+            }
+            Queue-Verbose "  Replay restore failed: `$path\`$name - `$(`$_.Exception.Message)"
+            return 'Failed'
+        }
+    }
+
+    if (`$DryRun) {
+        Queue-Info "  [DRY RUN] Would remove `$path\`$name to restore prior absence"
+        return 'Removed'
+    }
+    try {
+        `$current = Get-RegValueSnapshot -Path `$path -Name `$name
+        if (`$current.Exists) {
+            Remove-ItemProperty -LiteralPath `$path -Name `$name -Force -ErrorAction Stop
+        }
+        return 'Removed'
+    } catch {
+        Queue-Verbose "  Replay remove failed: `$path\`$name - `$(`$_.Exception.Message)"
+        return 'Failed'
+    }
+}
+function Invoke-UndoTransactionReplay {
+    param(`$TransactionLog)
+    `$summary = [ordered]@{ restored = 0; removed = 0; skipped = 0; failed = 0 }
+    `$entries = @(`$TransactionLog)
+    for (`$i = `$entries.Count - 1; `$i -ge 0; `$i--) {
+        `$entry = `$entries[`$i]
+        if ((Get-TxField `$entry 'Success' `$true) -eq `$false) { `$summary.skipped++; continue }
+        `$hasBeforeExists = `$false
+        if (`$entry -is [System.Collections.IDictionary]) {
+            `$hasBeforeExists = `$entry.Contains('BeforeExists')
+        } else {
+            `$hasBeforeExists = [bool]`$entry.PSObject.Properties['BeforeExists']
+        }
+        `$beforeValue = Get-TxField `$entry 'Before'
+        `$beforeExists = if (`$hasBeforeExists) { [bool](Get-TxField `$entry 'BeforeExists' `$false) } else { `$null -ne `$beforeValue }
+        `$beforeType = Get-TxField `$entry 'BeforeType' (Get-TxField `$entry 'Type' 'DWord')
+        `$action = Restore-RegValueForReplay -Entry `$entry -BeforeExists `$beforeExists -BeforeValue `$beforeValue -BeforeType `$beforeType
+        switch (`$action) {
+            'Restored' { `$summary.restored++ }
+            'Removed'  { `$summary.removed++ }
+            'Failed'   { `$summary.failed++ }
+            default    { `$summary.skipped++ }
+        }
+    }
+    return `$summary
+}
 function Set-RegValue {
     param([string]`$Path, [string]`$Name, `$Value, [string]`$Type = "DWord")
     if (`$DryRun) { Queue-Info "  [DRY RUN] Would set `$Path\`$Name = `$Value"; return `$true }
-    `$before = `$null
-    try { `$before = (Get-ItemProperty -Path `$Path -Name `$Name -ErrorAction SilentlyContinue).`$Name } catch {}
+    `$before = Get-RegValueSnapshot -Path `$Path -Name `$Name
     try {
-        if (-not (Test-Path `$Path)) { New-Item -Path `$Path -Force | Out-Null; Queue-Verbose "  Created key: `$Path" }
-        Set-ItemProperty -Path `$Path -Name `$Name -Value `$Value -Type `$Type -Force -ErrorAction Stop
-        `$TxLog.Enqueue(@{ Time=(Get-Date).ToString('o'); Op='Set'; Path=`$Path; Name=`$Name; Before=`$before; After=`$Value; Type=`$Type; Success=`$true })
+        if (-not (Test-Path -LiteralPath `$Path)) { New-Item -Path `$Path -Force | Out-Null; Queue-Verbose "  Created key: `$Path" }
+        Set-ItemProperty -LiteralPath `$Path -Name `$Name -Value `$Value -Type `$Type -Force -ErrorAction Stop
+        `$TxLog.Enqueue(@{ Time=(Get-Date).ToString('o'); Op='Set'; Path=`$Path; Name=`$Name; BeforeExists=`$before.Exists; Before=`$before.Value; BeforeType=`$before.Type; AfterExists=`$true; After=`$Value; AfterType=`$Type; Type=`$Type; Method='SetItemProperty'; Success=`$true })
         return `$true
     } catch {
-        `$TxLog.Enqueue(@{ Time=(Get-Date).ToString('o'); Op='Set'; Path=`$Path; Name=`$Name; Before=`$before; After=`$Value; Type=`$Type; Success=`$false; Error="`$_" })
+        `$TxLog.Enqueue(@{ Time=(Get-Date).ToString('o'); Op='Set'; Path=`$Path; Name=`$Name; BeforeExists=`$before.Exists; Before=`$before.Value; BeforeType=`$before.Type; AfterExists=`$true; After=`$Value; AfterType=`$Type; Type=`$Type; Method='SetItemProperty'; Success=`$false; Error="`$_" })
         Queue-Err "  REG ERROR: `$Path\`$Name - `$_"; return `$false
     }
 }
 function Remove-RegValue {
     param([string]`$Path, [string]`$Name)
     if (`$DryRun) { Queue-Info "  [DRY RUN] Would remove `$Path\`$Name"; return `$true }
-    `$before = `$null
-    try { `$before = (Get-ItemProperty -Path `$Path -Name `$Name -ErrorAction SilentlyContinue).`$Name } catch {}
+    `$before = Get-RegValueSnapshot -Path `$Path -Name `$Name
     try {
-        if (Test-Path `$Path) {
-            `$val = Get-ItemProperty -Path `$Path -Name `$Name -ErrorAction SilentlyContinue
-            if (`$null -ne `$val.`$Name) { Remove-ItemProperty -Path `$Path -Name `$Name -Force -ErrorAction Stop }
+        if (Test-Path -LiteralPath `$Path) {
+            if (`$before.Exists) { Remove-ItemProperty -LiteralPath `$Path -Name `$Name -Force -ErrorAction Stop }
         }
-        `$TxLog.Enqueue(@{ Time=(Get-Date).ToString('o'); Op='Remove'; Path=`$Path; Name=`$Name; Before=`$before; After=`$null; Success=`$true })
+        `$TxLog.Enqueue(@{ Time=(Get-Date).ToString('o'); Op='Remove'; Path=`$Path; Name=`$Name; BeforeExists=`$before.Exists; Before=`$before.Value; BeforeType=`$before.Type; AfterExists=`$false; After=`$null; AfterType=`$null; Method='RemoveItemProperty'; Success=`$true })
         return `$true
     } catch {
-        `$TxLog.Enqueue(@{ Time=(Get-Date).ToString('o'); Op='Remove'; Path=`$Path; Name=`$Name; Before=`$before; After=`$null; Success=`$false; Error="`$_" })
+        `$TxLog.Enqueue(@{ Time=(Get-Date).ToString('o'); Op='Remove'; Path=`$Path; Name=`$Name; BeforeExists=`$before.Exists; Before=`$before.Value; BeforeType=`$before.Type; AfterExists=`$false; After=`$null; AfterType=`$null; Method='RemoveItemProperty'; Success=`$false; Error="`$_" })
         Queue-Err "  REG REMOVE ERROR: `$Path\`$Name - `$_"; return `$false
     }
 }
@@ -1535,12 +1632,11 @@ function Set-ProtectedRegValue {
     param([string]`$KeyPath, [string]`$ValueName, [int]`$Value)
     if (`$DryRun) { Queue-Info "  [DRY RUN] Would set `$KeyPath\`$ValueName = `$Value (protected)"; return `$true }
     `$fullPath = "HKLM:\`$KeyPath"
-    `$beforeVal = `$null
-    try { `$beforeVal = (Get-ItemProperty -Path `$fullPath -Name `$ValueName -ErrorAction SilentlyContinue).`$ValueName } catch {}
+    `$before = Get-RegValueSnapshot -Path `$fullPath -Name `$ValueName
     # Attempt 1: Direct write
     try {
-        Set-ItemProperty -Path `$fullPath -Name `$ValueName -Value `$Value -Type DWord -Force -ErrorAction Stop
-        `$TxLog.Enqueue(@{ Time=(Get-Date).ToString('o'); Op='SetProtected'; Path=`$fullPath; Name=`$ValueName; Before=`$beforeVal; After=`$Value; Method='Direct'; Success=`$true })
+        Set-ItemProperty -LiteralPath `$fullPath -Name `$ValueName -Value `$Value -Type DWord -Force -ErrorAction Stop
+        `$TxLog.Enqueue(@{ Time=(Get-Date).ToString('o'); Op='SetProtected'; Path=`$fullPath; Name=`$ValueName; BeforeExists=`$before.Exists; Before=`$before.Value; BeforeType=`$before.Type; AfterExists=`$true; After=`$Value; AfterType='DWord'; Type='DWord'; Method='Direct'; Success=`$true })
         return `$true
     } catch { Queue-Verbose "    Direct write failed for `$KeyPath\`$ValueName" }
     # Attempt 2: Take ownership + write via .NET handle
@@ -1571,7 +1667,7 @@ function Set-ProtectedRegValue {
                 `$regKey2.SetValue(`$ValueName, `$Value, [Microsoft.Win32.RegistryValueKind]::DWord)
                 `$regKey2.Close()
                 Queue-Verbose "    Wrote via .NET handle: `$ValueName = `$Value"
-                `$TxLog.Enqueue(@{ Time=(Get-Date).ToString('o'); Op='SetProtected'; Path=`$fullPath; Name=`$ValueName; Before=`$beforeVal; After=`$Value; Method='NETHandle'; Success=`$true })
+                `$TxLog.Enqueue(@{ Time=(Get-Date).ToString('o'); Op='SetProtected'; Path=`$fullPath; Name=`$ValueName; BeforeExists=`$before.Exists; Before=`$before.Value; BeforeType=`$before.Type; AfterExists=`$true; After=`$Value; AfterType='DWord'; Type='DWord'; Method='NETHandle'; Success=`$true })
                 return `$true
             }
         }
@@ -1582,7 +1678,7 @@ function Set-ProtectedRegValue {
         `$result = & reg.exe add `$regExePath /v `$ValueName /t REG_DWORD /d `$Value /f 2>&1
         if (`$LASTEXITCODE -eq 0) {
             Queue-Verbose "    Wrote via reg.exe: `$ValueName = `$Value"
-            `$TxLog.Enqueue(@{ Time=(Get-Date).ToString('o'); Op='SetProtected'; Path=`$fullPath; Name=`$ValueName; Before=`$beforeVal; After=`$Value; Method='RegExe'; Success=`$true })
+            `$TxLog.Enqueue(@{ Time=(Get-Date).ToString('o'); Op='SetProtected'; Path=`$fullPath; Name=`$ValueName; BeforeExists=`$before.Exists; Before=`$before.Value; BeforeType=`$before.Type; AfterExists=`$true; After=`$Value; AfterType='DWord'; Type='DWord'; Method='RegExe'; Success=`$true })
             return `$true
         } else { Queue-Verbose "    reg.exe failed: `$result" }
     } catch { Queue-Verbose "    reg.exe exception: `$(`$_.Exception.Message)" }
@@ -1597,11 +1693,11 @@ function Set-ProtectedRegValue {
         `$check = (Get-ItemProperty -Path `$fullPath -Name `$ValueName -ErrorAction SilentlyContinue).`$ValueName
         if (`$check -eq `$Value) {
             Queue-Verbose "    Wrote via SYSTEM task: `$ValueName = `$Value"
-            `$TxLog.Enqueue(@{ Time=(Get-Date).ToString('o'); Op='SetProtected'; Path=`$fullPath; Name=`$ValueName; Before=`$beforeVal; After=`$Value; Method='SystemTask'; Success=`$true })
+            `$TxLog.Enqueue(@{ Time=(Get-Date).ToString('o'); Op='SetProtected'; Path=`$fullPath; Name=`$ValueName; BeforeExists=`$before.Exists; Before=`$before.Value; BeforeType=`$before.Type; AfterExists=`$true; After=`$Value; AfterType='DWord'; Type='DWord'; Method='SystemTask'; Success=`$true })
             return `$true
         }
     } catch { Queue-Verbose "    SYSTEM task failed: `$(`$_.Exception.Message)" }
-    `$TxLog.Enqueue(@{ Time=(Get-Date).ToString('o'); Op='SetProtected'; Path=`$fullPath; Name=`$ValueName; Before=`$beforeVal; After=`$Value; Method='AllFailed'; Success=`$false })
+    `$TxLog.Enqueue(@{ Time=(Get-Date).ToString('o'); Op='SetProtected'; Path=`$fullPath; Name=`$ValueName; BeforeExists=`$before.Exists; Before=`$before.Value; BeforeType=`$before.Type; AfterExists=`$true; After=`$Value; AfterType='DWord'; Type='DWord'; Method='AllFailed'; Success=`$false })
     Queue-Warn "    All methods failed for `$KeyPath\`$ValueName"
     return `$false
 }
@@ -2483,31 +2579,20 @@ function Invoke-EnableDefender {
             }
         }
 
-        # Replay: restore registry values from transaction log where Before was captured
+        # Replay in reverse order so each registry value returns to its exact prior state.
         if ($undoTxLog.Count -gt 0) {
             Queue-Phase "--- Undo Manifest Replay ---"
-            $replayCount = 0
-            $replayFail  = 0
-            foreach ($entry in $undoTxLog) {
-                if ($null -eq $entry.Before) { continue }  # no prior value to restore
-                if ($entry.Op -eq 'Remove') { continue }   # Remove ops had no value set
-                if (-not $entry.Path -or -not $entry.Name) { continue }
-                try {
-                    $regType = if ($entry.Type) { $entry.Type } else { 'DWord' }
-                    if ($DryRun) {
-                        Queue-Info "  [DRY RUN] Would restore $($entry.Path)\$($entry.Name) = $($entry.Before)"
-                    } else {
-                        if (-not (Test-Path $entry.Path)) { New-Item -Path $entry.Path -Force | Out-Null }
-                        Set-ItemProperty -Path $entry.Path -Name $entry.Name -Value $entry.Before -Type $regType -Force -ErrorAction Stop
-                    }
-                    $replayCount++
-                } catch {
-                    $replayFail++
-                    Queue-Verbose "  Replay failed: $($entry.Path)\$($entry.Name) - $($_.Exception.Message)"
+            $replaySummary = Invoke-UndoTransactionReplay -TransactionLog $undoTxLog
+            Queue-Info "  Undo replay: $($replaySummary.restored) values restored, $($replaySummary.removed) values removed, $($replaySummary.skipped) skipped, $($replaySummary.failed) failed"
+            if ($manifest) {
+                $manifest['undoReplay'] = @{
+                    source = $latestDisable.Name
+                    restored = $replaySummary.restored
+                    removed = $replaySummary.removed
+                    skipped = $replaySummary.skipped
+                    failed = $replaySummary.failed
                 }
             }
-            Queue-Info "  Undo replay: $replayCount values restored, $replayFail failed"
-            if ($manifest) { $manifest['undoReplay'] = @{ source = $latestDisable.Name; restored = $replayCount; failed = $replayFail } }
         }
         Start-Sleep -Milliseconds 60
 

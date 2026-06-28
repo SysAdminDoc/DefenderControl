@@ -4,6 +4,13 @@ All notable changes to DefenderControl will be documented in this file.
 
 ## Unreleased
 
+## [v3.3.2] - 2026-06-28
+
+### Fixed
+- Undo manifest replay is now lossless for registry transactions: manifests
+  record prior value existence and registry value kind, and Enable replays
+  transactions in reverse order to restore set, remove, and prior-absence cases.
+
 ## [v3.3.1] - 2026-06-27
 
 ### Fixed

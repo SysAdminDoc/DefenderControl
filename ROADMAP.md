@@ -8,13 +8,6 @@ No actionable roadmap items remain. Blocked or deferred items are tracked in `Ro
 
 ## Research-Driven Additions
 
-- [ ] P0 - Make undo manifest replay lossless
-  Why: Replay skips removed values and absent-before values, and direct replay can fail on protected keys.
-  Evidence: `DefenderControl.ps1:1464`, `DefenderControl.ps1:1479`, `DefenderControl.ps1:2432`
-  Touches: `Set-RegValue`, `Remove-RegValue`, `Set-ProtectedRegValue`, `Save-DefenderControlManifest`, enable replay logic
-  Acceptance: Transaction entries record value kind and existed-before state; replay restores set, remove, absence, and protected-key cases with test coverage.
-  Complexity: M
-
 - [ ] P1 - Add Defender for Endpoint and passive-mode preflight
   Why: Microsoft documents `AMRunningMode`, `ForceDefenderPassiveMode`, EDR Block Mode, and managed Tamper Protection behavior that can change disable/enable results.
   Evidence: Microsoft Defender Antivirus compatibility docs; `DefenderControl.ps1:318` state model lacks these fields.
