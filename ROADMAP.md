@@ -8,20 +8,6 @@ No actionable roadmap items remain. Blocked or deferred items are tracked in `Ro
 
 ## Research-Driven Additions
 
-- [ ] P0 - Publish v3.3.0 release asset
-  Why: The repo and README are v3.3.0, but GitHub still presents v3.2.1 as the latest public release.
-  Evidence: GitHub releases page; local `.factory/build-release.ps1`; local `dist\DefenderControl-v3.3.0.zip`
-  Touches: GitHub release only, `dist\DefenderControl-v3.3.0.zip`, `dist\SHA256SUMS.txt`
-  Acceptance: `v3.3.0` is the latest GitHub release and includes the portable ZIP plus checksum file.
-  Complexity: S
-
-- [ ] P0 - Surface background runspace failures
-  Why: `Start-BackgroundWork` currently catches `EndInvoke` exceptions without logging, so operation crashes can be invisible.
-  Evidence: `DefenderControl.ps1:1749`; Microsoft Defender operations are high-risk and need durable failure records.
-  Touches: `DefenderControl.ps1` (`Start-BackgroundWork`, log queue, status queue, event log helper)
-  Acceptance: A thrown worker exception appears in the GUI log, status text, Application event log, and `%ProgramData%\DefenderControl\logs\` crash file.
-  Complexity: M
-
 - [ ] P0 - Make undo manifest replay lossless
   Why: Replay skips removed values and absent-before values, and direct replay can fail on protected keys.
   Evidence: `DefenderControl.ps1:1464`, `DefenderControl.ps1:1479`, `DefenderControl.ps1:2432`

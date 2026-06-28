@@ -4,7 +4,7 @@ A professional PowerShell WPF utility to comprehensively disable or re-enable Mi
 
 ![PowerShell](https://img.shields.io/badge/PowerShell-5.1-blue?logo=powershell&logoColor=white)
 ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?logo=windows&logoColor=white)
-![Version](https://img.shields.io/badge/Version-v3.3.0-informational)
+![Version](https://img.shields.io/badge/Version-v3.3.1-informational)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 ---
@@ -134,7 +134,7 @@ Build the local release asset from the repository root:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".factory\build-release.ps1"
 ```
 
-The build cleans `dist\`, creates `dist\DefenderControl-v3.3.0.zip` containing `DefenderControl.ps1`, `README.md`, and `LICENSE`, then writes release checksums to `dist\SHA256SUMS.txt`.
+The build cleans `dist\`, creates `dist\DefenderControl-v3.3.1.zip` containing `DefenderControl.ps1`, `README.md`, and `LICENSE`, then writes release checksums to `dist\SHA256SUMS.txt`.
 
 ---
 

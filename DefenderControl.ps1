@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Defender Control v3.3.0 - Comprehensive Microsoft Defender Disable/Enable Utility
+    Defender Control v3.3.1 - Comprehensive Microsoft Defender Disable/Enable Utility
 
 .DESCRIPTION
     Professional WPF GUI + CLI tool to fully disable or re-enable Microsoft Defender
@@ -253,7 +253,7 @@ if (-not $script:IsCliMode) {
     Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
 }
 
-$script:Version    = "3.3.0"
+$script:Version    = "3.3.1"
 $script:DryRun     = [bool]$DryRun
 $script:ShowVerbose = $true
 
@@ -310,6 +310,44 @@ function Write-DefenderControlEvent {
     try {
         [System.Diagnostics.EventLog]::WriteEntry($script:EventLogSource, $Message, $EntryType, $EventId)
     } catch {}
+}
+
+function Write-DefenderControlCrashLog {
+    param(
+        [Parameter(Mandatory)][System.Exception]$Exception,
+        [System.Management.Automation.PowerShell]$PowerShell
+    )
+
+    $logDir = Join-Path $env:ProgramData 'DefenderControl\logs'
+    try {
+        if (-not (Test-Path -LiteralPath $logDir)) {
+            New-Item -Path $logDir -ItemType Directory -Force -ErrorAction Stop | Out-Null
+        }
+
+        $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+        $path = Join-Path $logDir "Crash-$stamp.log"
+        $lines = New-Object System.Collections.Generic.List[string]
+        $lines.Add("Defender Control v$script:Version - Background Worker Crash")
+        $lines.Add("Timestamp: $(Get-Date -Format 'o')")
+        $lines.Add("Computer: $env:COMPUTERNAME")
+        $lines.Add("OS: $script:OSDetail")
+        $lines.Add("")
+        $lines.Add("Exception:")
+        $lines.Add($Exception.ToString())
+
+        if ($PowerShell -and $PowerShell.Streams -and $PowerShell.Streams.Error.Count -gt 0) {
+            $lines.Add("")
+            $lines.Add("PowerShell error stream:")
+            foreach ($err in $PowerShell.Streams.Error) {
+                $lines.Add($err.ToString())
+            }
+        }
+
+        [System.IO.File]::WriteAllLines($path, $lines.ToArray(), [System.Text.Encoding]::UTF8)
+        return $path
+    } catch {
+        return $null
+    }
 }
 
 # ==================================================================================
@@ -1749,13 +1787,31 @@ function Start-BackgroundWork {
         $data  = $timer.Tag
         if ($data.Handle.IsCompleted) {
             $timer.Stop()
-            try { $data.PS.EndInvoke($data.Handle) } catch {}
+            $workerError = $null
+            try {
+                $data.PS.EndInvoke($data.Handle)
+            } catch {
+                $workerError = $_.Exception
+            }
+            if ($workerError) {
+                $crashPath = Write-DefenderControlCrashLog -Exception $workerError -PowerShell $data.PS
+                $message = $workerError.Message
+                if ([string]::IsNullOrWhiteSpace($message)) { $message = $workerError.GetType().FullName }
+                Queue-Err "Background operation failed: $message"
+                if ($crashPath) {
+                    Queue-Err "Crash log saved: $crashPath"
+                } else {
+                    Queue-Warn "Crash log could not be written to ProgramData"
+                }
+                Queue-Status -StatusText "ERROR" -StatusColor "#e74c3c" -TamperText "Operation failed - see log" -TamperColor "#e74c3c" -DisableBtn $true -EnableBtn $true -Progress 100 -RunningText "Background worker failed"
+                Write-DefenderControlEvent -Message "Defender Control: background operation failed on $env:COMPUTERNAME - $message" -EventId 9001 -EntryType ([System.Diagnostics.EventLogEntryType]::Error)
+            }
             $data.PS.Dispose()
             $data.Runspace.Dispose()
             $script:IsRunning = $false
             $btnRefresh.IsEnabled = $true
             $chkDryRun.IsEnabled  = $true
-            if ($data.AutoRefresh) {
+            if ($data.AutoRefresh -and -not $workerError) {
                 # Delayed auto-refresh after operation completes
                 $refreshTimer = [System.Windows.Threading.DispatcherTimer]::new()
                 $refreshTimer.Interval = [TimeSpan]::FromSeconds(2)
