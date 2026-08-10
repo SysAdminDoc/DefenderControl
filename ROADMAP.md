@@ -1,12 +1,8 @@
 # DefenderControl Roadmap
 
-PowerShell WPF Defender disable/enable utility with 4-level permission escalation and PPL flag stripping. Tracks work beyond the current release.
+Actionable work only. Historical and completed roadmap material is archived in CHANGELOG.md; blocked work is kept in Roadmap_Blocked.md.
 
-## Current Status
-
-No actionable roadmap items remain. Blocked or deferred items are tracked in `Roadmap_Blocked.md`.
-
-## Research-Driven Additions
+## Actionable Items
 
 - [ ] P1 - Add Defender for Endpoint and passive-mode preflight
   Why: Microsoft documents `AMRunningMode`, `ForceDefenderPassiveMode`, EDR Block Mode, and managed Tamper Protection behavior that can change disable/enable results.
