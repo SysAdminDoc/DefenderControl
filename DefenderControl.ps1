@@ -18,7 +18,7 @@
       - Live status dashboard showing all Defender component states
       - Tamper Protection detection with step-by-step disable guidance
       - Scheduled re-enable: auto re-enable Defender after 1-24 hours
-      - CLI: read-only Status / Health / Verify / Manifest modes with JSON output
+      - CLI: read-only Status / Health / Verify / Manifest / SupportBundle modes with JSON output
 
     WHAT THIS TOOL DOES NOT DO:
       - Does NOT touch Windows Firewall (completely unaffected)
@@ -45,6 +45,7 @@
       Status  - read-only snapshot of Defender state (exit 0)
       Health  - extended read-only enumeration (services, PPL, tasks, policy keys)
       Verify  - pass/fail assertion against enabled or disabled Defender state
+      SupportBundle - collect health, manifest, operation log, and event data into a ZIP
       Disable - reserved (CLI disable not yet implemented; use GUI)
       Enable  - reserved (CLI enable not yet implemented; use GUI)
 
@@ -63,6 +64,13 @@
 
 .PARAMETER NoReboot
     Suppress the reboot prompt even when changes require it (CLI-only).
+
+.PARAMETER OutputPath
+    Destination ZIP path for -Mode SupportBundle. Defaults to the current user's Desktop.
+
+.PARAMETER MpSupportFiles
+    With -Mode SupportBundle or the GUI, run MpCmdRun.exe -GetFiles and include the
+    resulting Microsoft Defender diagnostic CAB when available.
 
 .PARAMETER Help
     Print CLI usage and exit.
@@ -88,8 +96,10 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet('Disable','Enable','Status','Health','Verify','Manifest')]
+    [ValidateSet('Disable','Enable','Status','Health','Verify','Manifest','SupportBundle')]
     [string]$Mode,
+
+    [string]$OutputPath,
 
     [ValidateSet('Enabled','Disabled','Auto')]
     [string]$Expect = 'Auto',
@@ -101,7 +111,8 @@ param(
     [switch]$NoRestorePoint,
     [switch]$NoReboot,
     [switch]$Eicar,
-    [switch]$Force
+    [switch]$Force,
+    [switch]$MpSupportFiles
 )
 
 # ==================================================================================
@@ -130,6 +141,9 @@ Defender Control - CLI Usage
     DefenderControl.ps1 -Mode Health -Json       Extended state as JSON
     DefenderControl.ps1 -Mode Manifest            Print the latest undo manifest
     DefenderControl.ps1 -Mode Manifest -Json      Latest manifest as JSON
+    DefenderControl.ps1 -Mode SupportBundle       Create a diagnostic support ZIP
+    DefenderControl.ps1 -Mode SupportBundle -MpSupportFiles
+                                                   Include MpCmdRun diagnostic CAB
     DefenderControl.ps1 -Mode Verify              Assert Defender state matches
                                                   an expected shape (auto-inferred)
     DefenderControl.ps1 -Mode Verify -Expect Enabled   Assert fully enabled
@@ -147,6 +161,8 @@ Flags:
     -Expect         Verify assertion target: Enabled | Disabled | Auto (default)
     -Eicar          Opt-in EICAR synthetic detection test (Verify-only)
     -Force          Required with -Eicar to actually write the test file
+    -OutputPath     SupportBundle destination ZIP (default: Desktop)
+    -MpSupportFiles Include MpCmdRun.exe -GetFiles output in SupportBundle
 
 Exit codes:
     0 success   1 partial   2 tamper-blocked   3 safe-mode-needed
@@ -780,7 +796,9 @@ function Invoke-CliMode {
         [switch]$Json,
         [switch]$Silent,
         [switch]$Eicar,
-        [switch]$Force
+        [switch]$Force,
+        [string]$OutputPath,
+        [switch]$MpSupportFiles
     )
 
     $script:Silent = $Silent.IsPresent
@@ -887,6 +905,33 @@ function Invoke-CliMode {
             exit $script:EXIT_OK
         }
 
+        'SupportBundle' {
+            try {
+                Write-DefenderControlEvent -Message "Defender Control: support bundle collection started on $env:COMPUTERNAME" -EventId 3001
+                $bundle = New-DefenderControlSupportBundle `
+                    -OutputPath $OutputPath `
+                    -IncludeMpSupportFiles:$MpSupportFiles `
+                    -Version $script:Version `
+                    -OSDetail $script:OSDetail `
+                    -EventLogSource $script:EventLogSource
+                if ($Json.IsPresent) {
+                    [Console]::Out.WriteLine(($bundle | ConvertTo-Json -Depth 6))
+                } else {
+                    Write-CliLine ("Support bundle created: {0}" -f $bundle.Path)
+                    Write-CliLine ("Files: {0}  MpSupportFiles.cab: {1}" -f $bundle.FileCount, $bundle.IncludedMpSupportFiles)
+                    if ($bundle.Warnings.Count -gt 0) {
+                        foreach ($warning in $bundle.Warnings) { Write-CliLine ("WARN: {0}" -f $warning) -ErrorStream }
+                    }
+                }
+                Write-DefenderControlEvent -Message "Defender Control: support bundle created on $env:COMPUTERNAME at $($bundle.Path)" -EventId 3002
+                exit $script:EXIT_OK
+            } catch {
+                Write-DefenderControlEvent -Message "Defender Control: support bundle collection failed on $env:COMPUTERNAME - $($_.Exception.Message)" -EventId 3003 -EntryType ([System.Diagnostics.EventLogEntryType]::Error)
+                Write-CliLine ("DefenderControl: support bundle failed: {0}" -f $_.Exception.Message) -ErrorStream
+                exit $script:EXIT_USAGE
+            }
+        }
+
         'Disable' {
             Write-CliLine "DefenderControl: -Mode Disable is reserved. Use the GUI for mutating operations." -ErrorStream
             exit $script:EXIT_USAGE
@@ -902,8 +947,236 @@ function Invoke-CliMode {
     }
 }
 
+function New-DefenderControlSupportBundle {
+    [CmdletBinding()]
+    param(
+        [string]$OutputPath,
+        [switch]$IncludeMpSupportFiles,
+        $State,
+        [object[]]$LogEntries,
+        [string]$Version = 'unknown',
+        [string]$OSDetail = 'unknown',
+        [string]$EventLogSource = 'DefenderControl'
+    )
+
+    if ($null -eq $State) { $State = Get-DefenderState -Extended }
+
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    if ([string]::IsNullOrWhiteSpace($OutputPath)) {
+        $desktop = [Environment]::GetFolderPath('Desktop')
+        if ([string]::IsNullOrWhiteSpace($desktop) -or -not (Test-Path -LiteralPath $desktop)) {
+            $desktop = $env:TEMP
+        }
+        $OutputPath = Join-Path $desktop "DefenderControl-Support-$stamp.zip"
+    } elseif (Test-Path -LiteralPath $OutputPath -PathType Container) {
+        $OutputPath = Join-Path $OutputPath "DefenderControl-Support-$stamp.zip"
+    } elseif ([IO.Path]::GetExtension($OutputPath) -ne '.zip') {
+        $OutputPath = "$OutputPath.zip"
+    }
+
+    $parent = Split-Path -Parent $OutputPath
+    if ([string]::IsNullOrWhiteSpace($parent)) { $parent = (Get-Location).ProviderPath }
+    if (-not (Test-Path -LiteralPath $parent)) {
+        New-Item -Path $parent -ItemType Directory -Force -ErrorAction Stop | Out-Null
+    }
+    $OutputPath = Join-Path $parent (Split-Path -Leaf $OutputPath)
+
+    $tempRoot = Join-Path $env:TEMP "DefenderControl-Support-$([guid]::NewGuid().ToString('N'))"
+    $stage = Join-Path $tempRoot 'bundle'
+    $warnings = New-Object System.Collections.Generic.List[string]
+    $files = New-Object System.Collections.Generic.List[string]
+    $mpCollection = 'not-requested'
+    $mpSupportIncluded = $false
+    $manifestSource = $null
+
+    try {
+        New-Item -Path $stage -ItemType Directory -Force | Out-Null
+
+        $healthPath = Join-Path $stage 'Health.json'
+        [IO.File]::WriteAllText(
+            $healthPath,
+            ($State | ConvertTo-Json -Depth 12),
+            [Text.UTF8Encoding]::new($false))
+        $files.Add('Health.json') | Out-Null
+
+        $manifestDir = Join-Path $env:ProgramData 'DefenderControl\manifests'
+        $latestManifest = $null
+        if (Test-Path -LiteralPath $manifestDir) {
+            $latestManifest = Get-ChildItem -LiteralPath $manifestDir -Filter '*.json' -File -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        }
+        $manifestStage = Join-Path $stage 'manifest'
+        New-Item -Path $manifestStage -ItemType Directory -Force | Out-Null
+        if ($latestManifest) {
+            Copy-Item -LiteralPath $latestManifest.FullName -Destination (Join-Path $manifestStage 'latest.json') -Force
+            $manifestSource = $latestManifest.FullName
+            $files.Add('manifest\latest.json') | Out-Null
+        } else {
+            $manifestNote = Join-Path $manifestStage 'none.txt'
+            [IO.File]::WriteAllText($manifestNote, 'No DefenderControl manifest was found on this device.', [Text.UTF8Encoding]::new($false))
+            $warnings.Add('No DefenderControl manifest was found.') | Out-Null
+            $files.Add('manifest\none.txt') | Out-Null
+        }
+
+        $operationLines = New-Object System.Collections.Generic.List[string]
+        $operationLines.Add("Defender Control v$Version - Support Bundle")
+        $operationLines.Add("Generated: $(Get-Date -Format 'o')")
+        $operationLines.Add("System: $env:COMPUTERNAME | $OSDetail")
+        $operationLines.Add('')
+        if (@($LogEntries).Count -gt 0) {
+            $operationLines.Add('GUI operation log:')
+            foreach ($entry in @($LogEntries)) {
+                $time = if ($entry.Time) { $entry.Time } else { '--:--:--' }
+                $message = if ($entry.Message) { $entry.Message } else { "$entry" }
+                $operationLines.Add("[$time] $message")
+            }
+        } else {
+            $operationLines.Add('CLI support bundle: no in-memory GUI operation log was available.')
+            $operationLines.Add('The Health.json, manifest, event log, and optional Defender CAB contain the collected diagnostics.')
+        }
+        $logPath = Join-Path $stage 'operation-log.txt'
+        [IO.File]::WriteAllLines($logPath, $operationLines.ToArray(), [Text.UTF8Encoding]::new($false))
+        $files.Add('operation-log.txt') | Out-Null
+
+        $eventRecords = @()
+        try {
+            $eventStart = (Get-Date).AddDays(-7)
+            $eventRecords = @(Get-WinEvent -FilterHashtable @{
+                    LogName = 'Application'
+                    ProviderName = $EventLogSource
+                    StartTime = $eventStart
+                } -MaxEvents 200 -ErrorAction Stop | ForEach-Object {
+                    [ordered]@{
+                        TimeCreated = $_.TimeCreated.ToString('o')
+                        Id = $_.Id
+                        Level = $_.LevelDisplayName
+                        Provider = $_.ProviderName
+                        Message = $_.Message
+                    }
+                })
+        } catch {
+            $warnings.Add("Recent DefenderControl event log could not be read: $($_.Exception.Message)") | Out-Null
+        }
+        $eventsPath = Join-Path $stage 'events.json'
+        $eventJson = if (@($eventRecords).Count -gt 0) {
+            $eventRecords | ConvertTo-Json -Depth 6
+        } else {
+            '[]'
+        }
+        [IO.File]::WriteAllText($eventsPath, $eventJson, [Text.UTF8Encoding]::new($false))
+        $files.Add('events.json') | Out-Null
+
+        $logDir = Join-Path $env:ProgramData 'DefenderControl\logs'
+        if (Test-Path -LiteralPath $logDir) {
+            $recentLogs = @(Get-ChildItem -LiteralPath $logDir -Filter '*.log' -File -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending | Select-Object -First 10)
+            if ($recentLogs.Count -gt 0) {
+                $logStage = Join-Path $stage 'logs'
+                New-Item -Path $logStage -ItemType Directory -Force | Out-Null
+                foreach ($recentLog in $recentLogs) {
+                    Copy-Item -LiteralPath $recentLog.FullName -Destination (Join-Path $logStage $recentLog.Name) -Force
+                    $files.Add("logs\$($recentLog.Name)") | Out-Null
+                }
+            }
+        }
+
+        if ($IncludeMpSupportFiles.IsPresent) {
+            $mpCollection = 'requested'
+            $mpOutputRoot = Join-Path $tempRoot 'mp-support-output'
+            New-Item -Path $mpOutputRoot -ItemType Directory -Force | Out-Null
+            $mpCandidates = New-Object System.Collections.Generic.List[string]
+            $platformRoot = Join-Path $env:ProgramData 'Microsoft\Windows Defender\Platform'
+            if (Test-Path -LiteralPath $platformRoot) {
+                $platformDirs = @(Get-ChildItem -LiteralPath $platformRoot -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending)
+                foreach ($platformDir in $platformDirs) {
+                    $mpCandidates.Add((Join-Path $platformDir.FullName 'MpCmdRun.exe')) | Out-Null
+                }
+            }
+            $mpCandidates.Add((Join-Path $env:ProgramFiles 'Windows Defender\MpCmdRun.exe')) | Out-Null
+            $mpCmdRun = $mpCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+            $mpOutputPath = Join-Path $stage 'MpCmdRun-output.txt'
+            if ($mpCmdRun) {
+                $stdoutPath = Join-Path $mpOutputRoot 'stdout.txt'
+                $stderrPath = Join-Path $mpOutputRoot 'stderr.txt'
+                try {
+                    $argumentList = '-GetFiles -SupportLogLocation "' + $mpOutputRoot + '"'
+                    $mpProcess = Start-Process -FilePath $mpCmdRun -ArgumentList $argumentList `
+                        -WorkingDirectory (Split-Path -Parent $mpCmdRun) -WindowStyle Hidden -Wait -PassThru `
+                        -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -ErrorAction Stop
+                    $mpCollection = "completed (exit $($mpProcess.ExitCode))"
+                } catch {
+                    $mpCollection = 'failed'
+                    $warnings.Add("MpCmdRun.exe -GetFiles failed: $($_.Exception.Message)") | Out-Null
+                }
+                $mpOutputLines = @(
+                    "MpCmdRun.exe: $mpCmdRun"
+                    "Collection: $mpCollection"
+                    ''
+                )
+                if (Test-Path -LiteralPath $stdoutPath) { $mpOutputLines += Get-Content -LiteralPath $stdoutPath }
+                if (Test-Path -LiteralPath $stderrPath) { $mpOutputLines += Get-Content -LiteralPath $stderrPath }
+                [IO.File]::WriteAllLines($mpOutputPath, $mpOutputLines, [Text.UTF8Encoding]::new($false))
+                $files.Add('MpCmdRun-output.txt') | Out-Null
+
+                $mpCab = Get-ChildItem -LiteralPath $mpOutputRoot -Recurse -Filter '*.cab' -File -ErrorAction SilentlyContinue |
+                    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+                if (-not $mpCab) {
+                    $defaultCab = Join-Path $env:ProgramData 'Microsoft\Windows Defender\Support\MpSupportFiles.cab'
+                    if (Test-Path -LiteralPath $defaultCab) { $mpCab = Get-Item -LiteralPath $defaultCab }
+                }
+                if ($mpCab) {
+                    Copy-Item -LiteralPath $mpCab.FullName -Destination (Join-Path $stage 'MpSupportFiles.cab') -Force
+                    $mpSupportIncluded = $true
+                    $files.Add('MpSupportFiles.cab') | Out-Null
+                } else {
+                    $warnings.Add('MpCmdRun completed but no MpSupportFiles.cab was found.') | Out-Null
+                }
+            } else {
+                $mpCollection = 'unavailable'
+                $warnings.Add('MpCmdRun.exe was not found; Microsoft Defender diagnostic CAB was not collected.') | Out-Null
+                [IO.File]::WriteAllText($mpOutputPath, 'MpCmdRun.exe was not found on this device.', [Text.UTF8Encoding]::new($false))
+                $files.Add('MpCmdRun-output.txt') | Out-Null
+            }
+        }
+
+        $metadata = [ordered]@{
+            schemaVersion = 1
+            generatedAt = (Get-Date).ToString('o')
+            version = $Version
+            host = $env:COMPUTERNAME
+            os = $OSDetail
+            healthMode = 'Extended'
+            manifestSource = $manifestSource
+            eventWindowDays = 7
+            eventCount = @($eventRecords).Count
+            includeMpSupportFiles = $IncludeMpSupportFiles.IsPresent
+            mpSupportCollection = $mpCollection
+            includedMpSupportFiles = $mpSupportIncluded
+            files = @($files)
+            warnings = @($warnings)
+        }
+        $metadataPath = Join-Path $stage 'bundle-metadata.json'
+        [IO.File]::WriteAllText($metadataPath, ($metadata | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
+        $files.Add('bundle-metadata.json') | Out-Null
+
+        Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $OutputPath -Force
+        $resolvedOutput = (Resolve-Path -LiteralPath $OutputPath).ProviderPath
+        return [pscustomobject]@{
+            Path = $resolvedOutput
+            FileCount = @($files).Count
+            IncludedMpSupportFiles = $mpSupportIncluded
+            Warnings = @($warnings)
+        }
+    } finally {
+        if (Test-Path -LiteralPath $tempRoot) {
+            Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 if ($script:IsCliMode) {
-    Invoke-CliMode -Mode $Mode -Expect $Expect -Json:$Json -Silent:$Silent -Eicar:$Eicar -Force:$Force
+    Invoke-CliMode -Mode $Mode -Expect $Expect -Json:$Json -Silent:$Silent -Eicar:$Eicar -Force:$Force `
+        -OutputPath $OutputPath -MpSupportFiles:$MpSupportFiles
     # Invoke-CliMode always exits; defensive fall-through:
     exit $script:EXIT_USAGE
 }
@@ -1359,6 +1632,8 @@ try {
                           Style="{StaticResource DarkCheck}" Margin="0,0,12,0"/>
                 <Button x:Name="btnExport" Content="Export" Background="#2a2a4a"
                         Style="{StaticResource SmallButton}" Margin="0,0,6,0"/>
+                <Button x:Name="btnSupportBundle" Content="Support Bundle" Background="#2a2a4a"
+                        Style="{StaticResource SmallButton}" Margin="0,0,6,0"/>
                 <Button x:Name="btnClearLog" Content="Clear" Background="#2a2a4a"
                         Style="{StaticResource SmallButton}"/>
             </StackPanel>
@@ -1414,6 +1689,7 @@ $btnEnable   = $window.FindName("btnEnable")
 $btnRefresh  = $window.FindName("btnRefresh")
 $btnReboot   = $window.FindName("btnReboot")
 $btnExport   = $window.FindName("btnExport")
+$btnSupportBundle = $window.FindName("btnSupportBundle")
 $btnClearLog = $window.FindName("btnClearLog")
 $chkDryRun   = $window.FindName("chkDryRun")
 $chkVerbose  = $window.FindName("chkVerbose")
@@ -2151,11 +2427,16 @@ function Write-DefenderControlEvent {
 }
 "@
 
+# Keep the support bundle writer available to GUI runspaces without maintaining
+# a second copy of its implementation inside the injected function block.
+$script:SharedFunctions += "`nfunction New-DefenderControlSupportBundle {`n" +
+    ${function:New-DefenderControlSupportBundle}.ToString() + "`n}`n"
+
 # ==================================================================================
 #  BACKGROUND RUNSPACE RUNNER
 # ==================================================================================
 function Start-BackgroundWork {
-    param([ScriptBlock]$Work, [switch]$AutoRefresh)
+    param([ScriptBlock]$Work, [switch]$AutoRefresh, [hashtable]$Context)
 
     $script:IsRunning = $true
     $script:DryRun = $chkDryRun.IsChecked
@@ -2163,6 +2444,7 @@ function Start-BackgroundWork {
         $btnDisable.IsEnabled = $false
         $btnEnable.IsEnabled  = $false
         $btnRefresh.IsEnabled = $false
+        $btnSupportBundle.IsEnabled = $false
         $chkDryRun.IsEnabled  = $false
     })
 
@@ -2176,6 +2458,11 @@ function Start-BackgroundWork {
     $runspace.SessionStateProxy.SetVariable("OSBuild",     $script:OSBuild)
     $runspace.SessionStateProxy.SetVariable("EventLogReady",  $script:EventLogReady)
     $runspace.SessionStateProxy.SetVariable("EventLogSource", $script:EventLogSource)
+    if ($Context) {
+        foreach ($contextEntry in $Context.GetEnumerator()) {
+            $runspace.SessionStateProxy.SetVariable($contextEntry.Key, $contextEntry.Value)
+        }
+    }
     $txLog = [System.Collections.Concurrent.ConcurrentQueue[hashtable]]::new()
     $runspace.SessionStateProxy.SetVariable("TxLog", $txLog)
     $runspace.SessionStateProxy.SetVariable("TxLogRef", $txLog)
@@ -2220,6 +2507,7 @@ function Start-BackgroundWork {
             $data.Runspace.Dispose()
             $script:IsRunning = $false
             $btnRefresh.IsEnabled = $true
+            $btnSupportBundle.IsEnabled = $true
             $chkDryRun.IsEnabled  = $true
             if ($data.AutoRefresh -and -not $workerError) {
                 # Delayed auto-refresh after operation completes
@@ -3376,6 +3664,52 @@ $btnExport.Add_Click({
             Queue-Success "Log exported to: $($dlg.FileName)"
         } catch {
             Queue-Err "Export failed: $($_.Exception.Message)"
+        }
+    }
+})
+
+$btnSupportBundle.Add_Click({
+    if ($script:IsRunning) { return }
+    $dlg = [System.Windows.Forms.SaveFileDialog]::new()
+    $dlg.Title = "Create Defender Control Support Bundle"
+    $dlg.Filter = "ZIP Archives (*.zip)|*.zip|All Files (*.*)|*.*"
+    $dlg.FileName = "DefenderControl-Support-$(Get-Date -Format 'yyyyMMdd_HHmmss').zip"
+    $dlg.InitialDirectory = [Environment]::GetFolderPath("Desktop")
+    if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        $collectMpSupport = ([System.Windows.MessageBox]::Show(
+            "Collect the optional Microsoft Defender diagnostic CAB with MpCmdRun.exe?`n`nThis can take several minutes and may include detailed Defender telemetry.",
+            "Include Microsoft Defender Diagnostics", "YesNo", "Question") -eq "Yes")
+        try {
+            $supportState = Get-DefenderState -Extended
+            $supportLogs = @($script:AllLogEntries)
+            Write-DefenderControlEvent -Message "Defender Control: support bundle collection started on $env:COMPUTERNAME" -EventId 3001
+            Start-BackgroundWork -Context @{
+                SupportOutputPath = $dlg.FileName
+                SupportIncludeMpSupportFiles = $collectMpSupport
+                SupportState = $supportState
+                SupportLogEntries = $supportLogs
+                SupportVersion = $script:Version
+                SupportOSDetail = $script:OSDetail
+            } -Work {
+                try {
+                    $bundle = New-DefenderControlSupportBundle `
+                        -OutputPath $SupportOutputPath `
+                        -IncludeMpSupportFiles:$SupportIncludeMpSupportFiles `
+                        -State $SupportState `
+                        -LogEntries $SupportLogEntries `
+                        -Version $SupportVersion `
+                        -OSDetail $SupportOSDetail `
+                        -EventLogSource 'DefenderControl'
+                    foreach ($warning in @($bundle.Warnings)) { Queue-Warn "Support bundle: $warning" }
+                    Queue-Success "Support bundle created: $($bundle.Path)"
+                    Write-DefenderControlEvent -Message "Defender Control: support bundle created on $env:COMPUTERNAME at $($bundle.Path)" -EventId 3002
+                } catch {
+                    Queue-Err "Support bundle failed: $($_.Exception.Message)"
+                    Write-DefenderControlEvent -Message "Defender Control: support bundle collection failed on $env:COMPUTERNAME - $($_.Exception.Message)" -EventId 3003 -EntryType ([System.Diagnostics.EventLogEntryType]::Error)
+                }
+            }
+        } catch {
+            Queue-Err "Support bundle failed to start: $($_.Exception.Message)"
         }
     }
 })

@@ -9,6 +9,10 @@ All notable changes to DefenderControl will be documented in this file.
   mode, platform version, MDE onboarding signals, passive-mode policy, managed
   tamper-protection signals, and a clear managed-device warning in the GUI,
   CLI state/verify JSON, and operation manifests.
+- Support Bundle export is available from the GUI and `-Mode SupportBundle`.
+  Bundles include extended Health JSON, the latest manifest, operation log,
+  recent DefenderControl Application events, crash logs, and optional
+  `MpSupportFiles.cab` collection through `MpCmdRun.exe -GetFiles`.
 
 ## [v3.3.2] - 2026-06-28
 

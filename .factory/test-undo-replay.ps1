@@ -13,11 +13,11 @@ if ($errs -and $errs.Count -gt 0) {
     exit 1
 }
 
-$assignment = $ast.Find({
+$assignment = @($ast.FindAll({
     param($n)
     $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and
     $n.Left.Extent.Text -eq '$script:SharedFunctions'
-}, $true)
+}, $true) | Where-Object { $_.Operator -eq 'Equals' } | Select-Object -First 1)
 
 if (-not $assignment) {
     Write-Error 'Could not find SharedFunctions assignment'

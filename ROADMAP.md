@@ -4,13 +4,6 @@ Actionable work only. Historical and completed roadmap material is archived in C
 
 ## Actionable Items
 
-- [ ] P1 - Add support bundle export
-  Why: Users need one artifact for failed disables/enables, and Microsoft provides `MpCmdRun.exe -GetFiles` for Defender diagnostics.
-  Evidence: Microsoft Defender diagnostic collection docs; existing manual log export in `DefenderControl.ps1:2839`
-  Touches: `DefenderControl.ps1` export handler, manifests, event-log helper, CLI read-only surface
-  Acceptance: GUI and CLI can generate a ZIP containing Health JSON, latest manifest, operation log, recent DefenderControl event-log entries, and optional `MpSupportFiles.cab`.
-  Complexity: M
-
 - [ ] P1 - Formalize local validation harness
   Why: Current `.factory` scripts cover isolated state/verify paths but not runspace shared-function parity, linting, or transaction replay.
   Evidence: `.factory\test-state.ps1`; `.factory\test-verify.ps1`; Pester and PSScriptAnalyzer docs

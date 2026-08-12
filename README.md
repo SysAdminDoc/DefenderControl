@@ -41,6 +41,7 @@ Defender Control performs a thorough multi-phase disable that persists across re
 - **Event Log Source** — Writes Disable/Enable start and completion events to the Windows Application log under `DefenderControl`
 - **Atomic Undo Replay** — Records registry before/after values in manifests and replays the latest Disable manifest during Enable
 - **MDE / Passive-Mode Preflight** — Reports Defender `Normal`, `Passive`, `EDR Block Mode`, or `Disabled` state, platform version, passive-mode policy, MDE onboarding signals, and managed-device warnings before mutation
+- **Support Bundle Export** — Creates a ZIP with extended Health JSON, the latest manifest, operation log, recent DefenderControl event entries, crash logs, and optional `MpSupportFiles.cab`
 
 ---
 
@@ -92,6 +93,12 @@ powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Health
 # Emit stable JSON for automation pipelines
 powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Health -Json
 
+# Create a support bundle on the Desktop
+powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode SupportBundle
+
+# Include the optional Microsoft Defender diagnostic CAB
+powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode SupportBundle -MpSupportFiles
+
 # Show CLI usage
 powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Help
 ```
@@ -133,6 +140,17 @@ Every Disable and Enable run writes a JSON audit manifest to `%ProgramData%\Defe
 powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Manifest
 powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Manifest -Json
 ```
+
+### Support Bundles
+
+Use the GUI's **Support Bundle** button or the CLI `-Mode SupportBundle` to
+create a ZIP for troubleshooting. It contains `Health.json`, the latest audit
+manifest (when available), the operation log, recent `DefenderControl`
+Application event entries, recent crash logs, and bundle metadata. Use
+`-MpSupportFiles` or choose the optional diagnostic collection in the GUI to
+run Microsoft's `MpCmdRun.exe -GetFiles` and include `MpSupportFiles.cab` when
+the Defender tool is available. The bundle is written to the Desktop by
+default; `-OutputPath` selects another ZIP path.
 
 ### Portable Release ZIP
 
