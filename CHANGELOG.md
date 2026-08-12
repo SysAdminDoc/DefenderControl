@@ -4,6 +4,12 @@ All notable changes to DefenderControl will be documented in this file.
 
 ## Unreleased
 
+### Added
+- Defender for Endpoint/passive-mode preflight now reports normalized Defender
+  mode, platform version, MDE onboarding signals, passive-mode policy, managed
+  tamper-protection signals, and a clear managed-device warning in the GUI,
+  CLI state/verify JSON, and operation manifests.
+
 ## [v3.3.2] - 2026-06-28
 
 ### Fixed

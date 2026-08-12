@@ -40,6 +40,7 @@ Defender Control performs a thorough multi-phase disable that persists across re
 - **PPL Status Dashboard** — Shows current Protected Process Light state for WinDefend, WdFilter/WdBoot, and WdNisDrv
 - **Event Log Source** — Writes Disable/Enable start and completion events to the Windows Application log under `DefenderControl`
 - **Atomic Undo Replay** — Records registry before/after values in manifests and replays the latest Disable manifest during Enable
+- **MDE / Passive-Mode Preflight** — Reports Defender `Normal`, `Passive`, `EDR Block Mode`, or `Disabled` state, platform version, passive-mode policy, MDE onboarding signals, and managed-device warnings before mutation
 
 ---
 
@@ -94,6 +95,13 @@ powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Health 
 # Show CLI usage
 powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Help
 ```
+
+Health JSON includes `DefenderMode`, `DefenderPlatformVersion`,
+`AMRunningMode`, `ForceDefenderPassiveMode`, MDE onboarding/status signals,
+managed tamper-protection signals, and `ManagedDeviceWarning` when local
+changes may be overridden by Defender for Endpoint or device policy. Disable
+and Enable manifests also record the read-only endpoint snapshot before and
+after the operation.
 
 **Exit codes:** `0` success, `1` partial, `2` blocked by Tamper Protection, `3` Safe Mode required, `4` usage / OS error, `5` verification failure.
 

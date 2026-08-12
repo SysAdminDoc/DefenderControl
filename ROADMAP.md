@@ -4,13 +4,6 @@ Actionable work only. Historical and completed roadmap material is archived in C
 
 ## Actionable Items
 
-- [ ] P1 - Add Defender for Endpoint and passive-mode preflight
-  Why: Microsoft documents `AMRunningMode`, `ForceDefenderPassiveMode`, EDR Block Mode, and managed Tamper Protection behavior that can change disable/enable results.
-  Evidence: Microsoft Defender Antivirus compatibility docs; `DefenderControl.ps1:318` state model lacks these fields.
-  Touches: `Get-DefenderState`, Health/Verify JSON, dashboard tiles, manifests, disable pre-flight warnings
-  Acceptance: Health JSON and GUI show Normal/Passive/EDR Block/Disabled, MDE/passive-mode registry signals, platform version, and a clear managed-device warning before mutation.
-  Complexity: M
-
 - [ ] P1 - Add support bundle export
   Why: Users need one artifact for failed disables/enables, and Microsoft provides `MpCmdRun.exe -GetFiles` for Defender diagnostics.
   Evidence: Microsoft Defender diagnostic collection docs; existing manual log export in `DefenderControl.ps1:2839`

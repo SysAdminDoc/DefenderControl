@@ -376,6 +376,12 @@ function Get-DefenderState {
         OnAccessProtectionEnabled  = $null
         AMServiceEnabled           = $null
         IsTamperProtected          = $null
+        AMRunningMode              = $null
+        DefenderMode               = 'Unknown'
+        AMProductVersion           = $null
+        DefenderPlatformVersion    = $null
+        AMEngineVersion            = $null
+        AMServiceVersion           = $null
         AntivirusSignatureLastUpdated = $null
         DefenderEffectivelyEnabled = $false
         PolicyDisableAntiSpyware   = $null
@@ -383,6 +389,17 @@ function Get-DefenderState {
         WinDefendStartType         = $null
         FirewallProfilesEnabled    = $null
         MpStatusQueryError         = $null
+        ForceDefenderPassiveMode   = $null
+        MDEStatusKeyPresent        = $false
+        MDEOnboardingState         = $null
+        MDESenseIsRunning          = $null
+        MDEOrgIdPresent            = $false
+        MDEOnboarded               = $false
+        ManagedDefenderProductType = $null
+        TPExclusions               = $null
+        ManagedTamperProtection    = $false
+        ManagedDevice              = $false
+        ManagedDeviceWarning       = $null
     }
 
     try {
@@ -396,6 +413,17 @@ function Get-DefenderState {
         $state.OnAccessProtectionEnabled = [bool]$mp.OnAccessProtectionEnabled
         $state.AMServiceEnabled          = [bool]$mp.AMServiceEnabled
         $state.IsTamperProtected         = [bool]$mp.IsTamperProtected
+        $amRunningMode = $mp.PSObject.Properties['AMRunningMode']
+        if ($amRunningMode) { $state.AMRunningMode = "$($amRunningMode.Value)" }
+        $amProductVersion = $mp.PSObject.Properties['AMProductVersion']
+        if ($amProductVersion) {
+            $state.AMProductVersion = "$($amProductVersion.Value)"
+            $state.DefenderPlatformVersion = $state.AMProductVersion
+        }
+        $amEngineVersion = $mp.PSObject.Properties['AMEngineVersion']
+        if ($amEngineVersion) { $state.AMEngineVersion = "$($amEngineVersion.Value)" }
+        $amServiceVersion = $mp.PSObject.Properties['AMServiceVersion']
+        if ($amServiceVersion) { $state.AMServiceVersion = "$($amServiceVersion.Value)" }
         if ($mp.AntivirusSignatureLastUpdated) {
             $state.AntivirusSignatureLastUpdated = $mp.AntivirusSignatureLastUpdated.ToString('o')
         }
@@ -425,6 +453,94 @@ function Get-DefenderState {
     } else {
         $state.WinDefendStatus    = 'NotFound'
         $state.WinDefendStartType = 'NotFound'
+    }
+
+    # Defender for Endpoint / passive-mode signals are read-only. These values
+    # explain why Defender may not respond to local disable requests on a
+    # managed device.
+    $passivePolicyPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Advanced Threat Protection'
+    $mdeStatusPath     = 'HKLM:\SOFTWARE\Microsoft\Windows Advanced Threat Protection\Status'
+    $managedPath       = 'HKLM:\SOFTWARE\Microsoft\Windows Defender'
+    $featuresPath      = 'HKLM:\SOFTWARE\Microsoft\Windows Defender\Features'
+    try {
+        $passiveReg = Get-ItemProperty -LiteralPath $passivePolicyPath -Name 'ForceDefenderPassiveMode' -ErrorAction SilentlyContinue
+        if ($null -ne $passiveReg) { $state.ForceDefenderPassiveMode = [int]$passiveReg.ForceDefenderPassiveMode }
+    } catch {}
+    try {
+        if (Test-Path -LiteralPath $mdeStatusPath) {
+            $state.MDEStatusKeyPresent = $true
+            $mdeStatus = Get-ItemProperty -LiteralPath $mdeStatusPath -ErrorAction SilentlyContinue
+            if ($mdeStatus) {
+                $onboarding = $mdeStatus.PSObject.Properties['OnboardingState']
+                if ($onboarding) { $state.MDEOnboardingState = [int]$onboarding.Value }
+                $senseRunning = $mdeStatus.PSObject.Properties['SenseIsRunning']
+                if ($senseRunning) { $state.MDESenseIsRunning = [int]$senseRunning.Value }
+                $orgId = $mdeStatus.PSObject.Properties['OrgId']
+                if ($orgId -and -not [string]::IsNullOrWhiteSpace("$($orgId.Value)")) { $state.MDEOrgIdPresent = $true }
+            }
+        }
+    } catch {}
+    try {
+        $managedReg = Get-ItemProperty -LiteralPath $managedPath -Name 'ManagedDefenderProductType' -ErrorAction SilentlyContinue
+        if ($null -ne $managedReg) { $state.ManagedDefenderProductType = [int]$managedReg.ManagedDefenderProductType }
+    } catch {}
+    try {
+        $tpReg = Get-ItemProperty -LiteralPath $featuresPath -Name 'TPExclusions' -ErrorAction SilentlyContinue
+        if ($null -ne $tpReg) { $state.TPExclusions = [int]$tpReg.TPExclusions }
+    } catch {}
+
+    if ($state.AMRunningMode -match 'EDR\s*Block') {
+        $state.DefenderMode = 'EDR Block Mode'
+    } elseif ($state.AMRunningMode -match 'Passive') {
+        $state.DefenderMode = 'Passive'
+    } elseif ($state.AMRunningMode -match '^Normal$') {
+        $state.DefenderMode = 'Normal'
+    } elseif ($state.AMRunningMode -match 'Disabled') {
+        $state.DefenderMode = 'Disabled'
+    } elseif (
+        $state.AMServiceEnabled -eq $false -or
+        $state.AntivirusEnabled -eq $false -or
+        $state.WinDefendStartType -eq 'Disabled' -or
+        $state.PolicyDisableAntiSpyware -eq 1
+    ) {
+        $state.DefenderMode = 'Disabled'
+    }
+
+    $state.MDEOnboarded = (
+        $state.MDEOnboardingState -eq 1 -or
+        $state.MDEOrgIdPresent -eq $true
+    )
+    $managedProduct = $state.ManagedDefenderProductType -in @(6, 7)
+    $managedTamper = ($managedProduct -or $state.TPExclusions -eq 1)
+    $state.ManagedTamperProtection = $managedTamper
+    $state.ManagedDevice = (
+        $state.MDEOnboarded -or
+        $state.ForceDefenderPassiveMode -eq 1 -or
+        $managedProduct -or
+        $state.TPExclusions -eq 1
+    )
+    if ($state.ManagedDevice) {
+        $signals = New-Object System.Collections.Generic.List[string]
+        if ($state.MDEOnboarded) { $signals.Add('MDE onboarding') | Out-Null }
+        if ($state.ForceDefenderPassiveMode -eq 1) { $signals.Add('passive-mode policy') | Out-Null }
+        if ($managedProduct) { $signals.Add("ManagedDefenderProductType=$($state.ManagedDefenderProductType)") | Out-Null }
+        if ($state.TPExclusions -eq 1) { $signals.Add('tamper-protected exclusions') | Out-Null }
+        $state.ManagedDeviceWarning = "Managed Defender or device-management signals detected ($($signals -join ', ')). Local changes may be ignored or reverted; consult your security administrator before disabling Defender."
+    }
+    $state.DefenderEndpoint = [ordered]@{
+        Mode                       = $state.DefenderMode
+        AMRunningMode              = $state.AMRunningMode
+        PlatformVersion            = $state.DefenderPlatformVersion
+        ForceDefenderPassiveMode  = $state.ForceDefenderPassiveMode
+        MDEStatusKeyPresent       = $state.MDEStatusKeyPresent
+        MDEOnboardingState        = $state.MDEOnboardingState
+        MDESenseIsRunning         = $state.MDESenseIsRunning
+        MDEOrgIdPresent           = $state.MDEOrgIdPresent
+        MDEOnboarded              = $state.MDEOnboarded
+        ManagedDefenderProductType = $state.ManagedDefenderProductType
+        TPExclusions              = $state.TPExclusions
+        ManagedTamperProtection   = $state.ManagedTamperProtection
+        ManagedDevice             = $state.ManagedDevice
     }
 
     try {
@@ -631,6 +747,11 @@ function Invoke-VerifyMode {
         expectation       = $expectResolved
         expectationSource = $Expect
         tamperProtected   = $state.IsTamperProtected
+        defenderMode      = $state.DefenderMode
+        platformVersion   = $state.DefenderPlatformVersion
+        managedDevice     = $state.ManagedDevice
+        managedDeviceWarning = $state.ManagedDeviceWarning
+        state             = $state
         overall           = $overall
         failCount         = $failCount
         checks            = @($checks)
@@ -686,10 +807,18 @@ function Invoke-CliMode {
                 Write-CliLine ("Behavior Monitor        : {0}" -f $state.BehaviorMonitorEnabled)
                 Write-CliLine ("NIS Enabled             : {0}" -f $state.NISEnabled)
                 Write-CliLine ("Tamper Protection       : {0}" -f $state.IsTamperProtected)
+                Write-CliLine ("Defender Mode           : {0}" -f $state.DefenderMode)
+                Write-CliLine ("Platform Version        : {0}" -f $state.DefenderPlatformVersion)
+                Write-CliLine ("MDE Onboarded           : {0}" -f $state.MDEOnboarded)
+                Write-CliLine ("Force Passive Policy    : {0}" -f $state.ForceDefenderPassiveMode)
+                Write-CliLine ("Managed Device Signals  : {0}" -f $state.ManagedDevice)
                 Write-CliLine ("Last Signature Update   : {0}" -f $state.AntivirusSignatureLastUpdated)
                 Write-CliLine ("WinDefend Service       : {0} (Start: {1})" -f $state.WinDefendStatus, $state.WinDefendStartType)
                 Write-CliLine ("Policy DisableAntiSpy   : {0}" -f $state.PolicyDisableAntiSpyware)
                 Write-CliLine ("Effectively Enabled     : {0}" -f $state.DefenderEffectivelyEnabled)
+                if ($state.ManagedDeviceWarning) {
+                    Write-CliLine ("WARN: {0}" -f $state.ManagedDeviceWarning) -ErrorStream
+                }
                 if ($state.FirewallProfilesEnabled) {
                     $fwLine = ($state.FirewallProfilesEnabled.GetEnumerator() |
                         ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ' '
@@ -1005,6 +1134,7 @@ try {
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -1066,6 +1196,7 @@ try {
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
                     <!-- Row 0 -->
@@ -1110,8 +1241,22 @@ try {
                         <TextBlock x:Name="dashPplWdNisDrv" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
                     </StackPanel>
 
-                    <!-- Row 3 -->
-                    <StackPanel Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,0,12,0">
+                    <!-- Row 3: Defender for Endpoint / passive mode -->
+                    <StackPanel Grid.Row="3" Grid.Column="0" Margin="0,0,12,6">
+                        <TextBlock Text="Defender Mode" FontSize="11" Foreground="{StaticResource TextDim}"/>
+                        <TextBlock x:Name="dashMode" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
+                    </StackPanel>
+                    <StackPanel Grid.Row="3" Grid.Column="1" Margin="0,0,12,6">
+                        <TextBlock Text="Platform Version" FontSize="11" Foreground="{StaticResource TextDim}"/>
+                        <TextBlock x:Name="dashPlatform" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
+                    </StackPanel>
+                    <StackPanel Grid.Row="3" Grid.Column="2" Margin="0,0,12,6">
+                        <TextBlock Text="MDE / Managed Signals" FontSize="11" Foreground="{StaticResource TextDim}"/>
+                        <TextBlock x:Name="dashMde" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
+                    </StackPanel>
+
+                    <!-- Row 4 -->
+                    <StackPanel Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,0,12,0">
                         <TextBlock Text="Last Definition Update" FontSize="11" Foreground="{StaticResource TextDim}"/>
                         <TextBlock x:Name="dashDefUpdate" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
                     </StackPanel>
@@ -1150,8 +1295,21 @@ try {
             </StackPanel>
         </Border>
 
+        <!-- Managed device warning panel (hidden by default) -->
+        <Border x:Name="managedWarningPanel" Grid.Row="4" Visibility="Collapsed"
+                Background="#2d2418" BorderBrush="#e67e22" BorderThickness="1"
+                CornerRadius="10" Padding="16,12" Margin="0,0,0,8">
+            <StackPanel>
+                <TextBlock Text="!! MANAGED DEFENDER SIGNALS DETECTED !!" FontSize="14" FontWeight="Bold"
+                           Foreground="#e67e22" Margin="0,0,0,6"/>
+                <TextBlock x:Name="txtManagedWarning" TextWrapping="Wrap" FontSize="12" Foreground="#f0c58a"/>
+                <TextBlock Text="Disable/Enable operations may be overridden by Microsoft Defender for Endpoint, Intune, or other device policy. Contact your security administrator before proceeding."
+                           TextWrapping="Wrap" FontSize="12" Foreground="#ecf0f1" Margin="0,8,0,0"/>
+            </StackPanel>
+        </Border>
+
         <!-- Scheduled Re-Enable -->
-        <Border Grid.Row="4" Style="{StaticResource Card}">
+        <Border Grid.Row="5" Style="{StaticResource Card}">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
@@ -1181,14 +1339,14 @@ try {
         </Border>
 
         <!-- Progress Bar -->
-        <Border Grid.Row="5" Background="#16213e" CornerRadius="4" Height="6" Margin="0,0,0,8">
+        <Border Grid.Row="6" Background="#16213e" CornerRadius="4" Height="6" Margin="0,0,0,8">
             <ProgressBar x:Name="progressBar" Minimum="0" Maximum="100" Value="0"
                          Height="6" Background="Transparent" Foreground="#3498db"
                          BorderThickness="0"/>
         </Border>
 
         <!-- Log Header -->
-        <Grid Grid.Row="6" Margin="0,0,0,0">
+        <Grid Grid.Row="7" Margin="0,0,0,0">
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                 <TextBlock Text="Operation Log" FontSize="13" FontWeight="SemiBold"
                            Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center"/>
@@ -1207,7 +1365,7 @@ try {
         </Grid>
 
         <!-- Log Body -->
-        <Border Grid.Row="7" Style="{StaticResource Card}" Margin="0,6,0,0">
+        <Border Grid.Row="8" Style="{StaticResource Card}" Margin="0,6,0,0">
             <Border Background="#0f1729" CornerRadius="6" Padding="4">
                 <ScrollViewer x:Name="logScroll" VerticalScrollBarVisibility="Auto">
                     <RichTextBox x:Name="rtbLog" Background="Transparent" BorderThickness="0"
@@ -1226,7 +1384,7 @@ try {
         </Border>
 
         <!-- Footer -->
-        <Grid Grid.Row="8" Margin="0,8,0,0">
+        <Grid Grid.Row="9" Margin="0,8,0,0">
             <TextBlock Text="Windows Firewall is NOT affected by this tool."
                        FontSize="11" Foreground="{StaticResource TextDim}" VerticalAlignment="Center"/>
             <TextBlock x:Name="txtVersion" Text=""
@@ -1269,6 +1427,9 @@ $dashFirewall  = $window.FindName("dashFirewall")
 $dashService   = $window.FindName("dashService")
 $dashAntiSpy   = $window.FindName("dashAntiSpy")
 $dashDefUpdate  = $window.FindName("dashDefUpdate")
+$dashMode       = $window.FindName("dashMode")
+$dashPlatform   = $window.FindName("dashPlatform")
+$dashMde        = $window.FindName("dashMde")
 $dashPplMsMpEng = $window.FindName("dashPplMsMpEng")
 $dashPplWdFilter = $window.FindName("dashPplWdFilter")
 $dashPplWdNisDrv = $window.FindName("dashPplWdNisDrv")
@@ -1277,6 +1438,8 @@ $btnRefreshDash = $window.FindName("btnRefreshDash")
 # Tamper Protection warning panel
 $tamperWarningPanel = $window.FindName("tamperWarningPanel")
 $btnOpenWSecurity   = $window.FindName("btnOpenWSecurity")
+$managedWarningPanel = $window.FindName("managedWarningPanel")
+$txtManagedWarning  = $window.FindName("txtManagedWarning")
 
 # Scheduled re-enable controls
 $cmbScheduleHours  = $window.FindName("cmbScheduleHours")
@@ -1330,6 +1493,10 @@ function Queue-Dashboard {
           [string]$PplMsMpEng = "--", [string]$PplMsMpEngColor = "#7f8c8d",
           [string]$PplWdFilter = "--", [string]$PplWdFilterColor = "#7f8c8d",
           [string]$PplWdNisDrv = "--", [string]$PplWdNisDrvColor = "#7f8c8d",
+          [string]$DefenderMode = "--", [string]$DefenderModeColor = "#7f8c8d",
+          [string]$PlatformVersion = "--", [string]$PlatformVersionColor = "#7f8c8d",
+          [string]$MdeStatus = "--", [string]$MdeStatusColor = "#7f8c8d",
+          [string]$ManagedWarning = "",
           [bool]$ShowTamperWarning = $false)
     $script:DashQueue.Enqueue(@{
         RTP = $RTP; RTPColor = $RTPColor
@@ -1342,6 +1509,10 @@ function Queue-Dashboard {
         PplMsMpEng = $PplMsMpEng; PplMsMpEngColor = $PplMsMpEngColor
         PplWdFilter = $PplWdFilter; PplWdFilterColor = $PplWdFilterColor
         PplWdNisDrv = $PplWdNisDrv; PplWdNisDrvColor = $PplWdNisDrvColor
+        DefenderMode = $DefenderMode; DefenderModeColor = $DefenderModeColor
+        PlatformVersion = $PlatformVersion; PlatformVersionColor = $PlatformVersionColor
+        MdeStatus = $MdeStatus; MdeStatusColor = $MdeStatusColor
+        ManagedWarning = $ManagedWarning
         ShowTamperWarning = $ShowTamperWarning
     })
 }
@@ -1436,12 +1607,31 @@ $script:uiTimer.Add_Tick({
             $dashPplWdNisDrv.Text = $dsh.PplWdNisDrv
             $dashPplWdNisDrv.Foreground = $bc.ConvertFromString($dsh.PplWdNisDrvColor)
         }
+        if ($dsh.DefenderMode) {
+            $dashMode.Text = $dsh.DefenderMode
+            $dashMode.Foreground = $bc.ConvertFromString($dsh.DefenderModeColor)
+        }
+        if ($dsh.PlatformVersion) {
+            $dashPlatform.Text = $dsh.PlatformVersion
+            $dashPlatform.Foreground = $bc.ConvertFromString($dsh.PlatformVersionColor)
+        }
+        if ($dsh.MdeStatus) {
+            $dashMde.Text = $dsh.MdeStatus
+            $dashMde.Foreground = $bc.ConvertFromString($dsh.MdeStatusColor)
+        }
         if ($dsh.ShowTamperWarning) {
             $tamperWarningPanel.Visibility = "Visible"
             $btnDisable.ToolTip = "Tamper Protection must be disabled first. See the warning panel below for instructions."
         } else {
             $tamperWarningPanel.Visibility = "Collapsed"
             $btnDisable.ToolTip = $null
+        }
+        if ($dsh.ManagedWarning) {
+            $txtManagedWarning.Text = $dsh.ManagedWarning
+            $managedWarningPanel.Visibility = "Visible"
+        } else {
+            $txtManagedWarning.Text = ""
+            $managedWarningPanel.Visibility = "Collapsed"
         }
     }
 })
@@ -1484,6 +1674,10 @@ function Queue-Dashboard {
           [string]`$PplMsMpEng = "--", [string]`$PplMsMpEngColor = "#7f8c8d",
           [string]`$PplWdFilter = "--", [string]`$PplWdFilterColor = "#7f8c8d",
           [string]`$PplWdNisDrv = "--", [string]`$PplWdNisDrvColor = "#7f8c8d",
+          [string]`$DefenderMode = "--", [string]`$DefenderModeColor = "#7f8c8d",
+          [string]`$PlatformVersion = "--", [string]`$PlatformVersionColor = "#7f8c8d",
+          [string]`$MdeStatus = "--", [string]`$MdeStatusColor = "#7f8c8d",
+          [string]`$ManagedWarning = "",
           [bool]`$ShowTamperWarning = `$false)
     `$DashQueue.Enqueue(@{
         RTP = `$RTP; RTPColor = `$RTPColor
@@ -1496,8 +1690,126 @@ function Queue-Dashboard {
         PplMsMpEng = `$PplMsMpEng; PplMsMpEngColor = `$PplMsMpEngColor
         PplWdFilter = `$PplWdFilter; PplWdFilterColor = `$PplWdFilterColor
         PplWdNisDrv = `$PplWdNisDrv; PplWdNisDrvColor = `$PplWdNisDrvColor
+        DefenderMode = `$DefenderMode; DefenderModeColor = `$DefenderModeColor
+        PlatformVersion = `$PlatformVersion; PlatformVersionColor = `$PlatformVersionColor
+        MdeStatus = `$MdeStatus; MdeStatusColor = `$MdeStatusColor
+        ManagedWarning = `$ManagedWarning
         ShowTamperWarning = `$ShowTamperWarning
     })
+}
+function Get-DefenderEndpointState {
+    param(`$MpStatus = `$null)
+    `$state = [ordered]@{
+        AMRunningMode               = `$null
+        DefenderMode                = 'Unknown'
+        AMProductVersion            = `$null
+        DefenderPlatformVersion     = `$null
+        AMEngineVersion             = `$null
+        AMServiceVersion            = `$null
+        IsTamperProtected           = `$null
+        ForceDefenderPassiveMode    = `$null
+        MDEStatusKeyPresent         = `$false
+        MDEOnboardingState          = `$null
+        MDESenseIsRunning           = `$null
+        MDEOrgIdPresent             = `$false
+        MDEOnboarded                = `$false
+        ManagedDefenderProductType  = `$null
+        TPExclusions                = `$null
+        ManagedTamperProtection     = `$false
+        ManagedDevice               = `$false
+        ManagedDeviceWarning        = `$null
+    }
+
+    if (`$null -eq `$MpStatus) {
+        try { `$MpStatus = Get-MpComputerStatus -ErrorAction Stop } catch {}
+    }
+    if (`$MpStatus) {
+        `$runningMode = `$MpStatus.PSObject.Properties['AMRunningMode']
+        if (`$runningMode) { `$state.AMRunningMode = "`$(`$runningMode.Value)" }
+        `$productVersion = `$MpStatus.PSObject.Properties['AMProductVersion']
+        if (`$productVersion) {
+            `$state.AMProductVersion = "`$(`$productVersion.Value)"
+            `$state.DefenderPlatformVersion = `$state.AMProductVersion
+        }
+        `$engineVersion = `$MpStatus.PSObject.Properties['AMEngineVersion']
+        if (`$engineVersion) { `$state.AMEngineVersion = "`$(`$engineVersion.Value)" }
+        `$serviceVersion = `$MpStatus.PSObject.Properties['AMServiceVersion']
+        if (`$serviceVersion) { `$state.AMServiceVersion = "`$(`$serviceVersion.Value)" }
+        `$tamper = `$MpStatus.PSObject.Properties['IsTamperProtected']
+        if (`$tamper) { `$state.IsTamperProtected = [bool]`$tamper.Value }
+    }
+
+    `$passivePolicyPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Advanced Threat Protection'
+    `$mdeStatusPath     = 'HKLM:\SOFTWARE\Microsoft\Windows Advanced Threat Protection\Status'
+    `$managedPath       = 'HKLM:\SOFTWARE\Microsoft\Windows Defender'
+    `$featuresPath      = 'HKLM:\SOFTWARE\Microsoft\Windows Defender\Features'
+    try {
+        `$passiveReg = Get-ItemProperty -LiteralPath `$passivePolicyPath -Name 'ForceDefenderPassiveMode' -ErrorAction SilentlyContinue
+        if (`$null -ne `$passiveReg) { `$state.ForceDefenderPassiveMode = [int]`$passiveReg.ForceDefenderPassiveMode }
+    } catch {}
+    try {
+        if (Test-Path -LiteralPath `$mdeStatusPath) {
+            `$state.MDEStatusKeyPresent = `$true
+            `$mdeStatus = Get-ItemProperty -LiteralPath `$mdeStatusPath -ErrorAction SilentlyContinue
+            if (`$mdeStatus) {
+                `$onboarding = `$mdeStatus.PSObject.Properties['OnboardingState']
+                if (`$onboarding) { `$state.MDEOnboardingState = [int]`$onboarding.Value }
+                `$senseRunning = `$mdeStatus.PSObject.Properties['SenseIsRunning']
+                if (`$senseRunning) { `$state.MDESenseIsRunning = [int]`$senseRunning.Value }
+                `$orgId = `$mdeStatus.PSObject.Properties['OrgId']
+                `$orgText = if (`$orgId) { [string]`$orgId.Value } else { '' }
+                if (-not [string]::IsNullOrWhiteSpace(`$orgText)) { `$state.MDEOrgIdPresent = `$true }
+            }
+        }
+    } catch {}
+    try {
+        `$managedReg = Get-ItemProperty -LiteralPath `$managedPath -Name 'ManagedDefenderProductType' -ErrorAction SilentlyContinue
+        if (`$null -ne `$managedReg) { `$state.ManagedDefenderProductType = [int]`$managedReg.ManagedDefenderProductType }
+    } catch {}
+    try {
+        `$tpReg = Get-ItemProperty -LiteralPath `$featuresPath -Name 'TPExclusions' -ErrorAction SilentlyContinue
+        if (`$null -ne `$tpReg) { `$state.TPExclusions = [int]`$tpReg.TPExclusions }
+    } catch {}
+
+    if (`$state.AMRunningMode -match 'EDR\s*Block') {
+        `$state.DefenderMode = 'EDR Block Mode'
+    } elseif (`$state.AMRunningMode -match 'Passive') {
+        `$state.DefenderMode = 'Passive'
+    } elseif (`$state.AMRunningMode -match '^Normal$') {
+        `$state.DefenderMode = 'Normal'
+    } elseif (`$state.AMRunningMode -match 'Disabled') {
+        `$state.DefenderMode = 'Disabled'
+    }
+    if (`$state.DefenderMode -eq 'Unknown' -and `$MpStatus) {
+        if (`$MpStatus.AMServiceEnabled -eq `$false -or `$MpStatus.AntivirusEnabled -eq `$false) {
+            `$state.DefenderMode = 'Disabled'
+        }
+    }
+    if (`$state.DefenderMode -eq 'Unknown') {
+        try {
+            `$winDefend = Get-Service -Name 'WinDefend' -ErrorAction SilentlyContinue
+            if (`$winDefend -and `$winDefend.Status -eq 'Stopped') { `$state.DefenderMode = 'Disabled' }
+        } catch {}
+    }
+
+    `$state.MDEOnboarded = (`$state.MDEOnboardingState -eq 1 -or `$state.MDEOrgIdPresent -eq `$true)
+    `$managedProduct = `$state.ManagedDefenderProductType -in @(6, 7)
+    `$state.ManagedTamperProtection = (`$managedProduct -or `$state.TPExclusions -eq 1)
+    `$state.ManagedDevice = (
+        `$state.MDEOnboarded -or
+        `$state.ForceDefenderPassiveMode -eq 1 -or
+        `$managedProduct -or
+        `$state.TPExclusions -eq 1
+    )
+    if (`$state.ManagedDevice) {
+        `$signals = New-Object System.Collections.Generic.List[string]
+        if (`$state.MDEOnboarded) { `$signals.Add('MDE onboarding') | Out-Null }
+        if (`$state.ForceDefenderPassiveMode -eq 1) { `$signals.Add('passive-mode policy') | Out-Null }
+        if (`$managedProduct) { `$signals.Add("ManagedDefenderProductType=`$(`$state.ManagedDefenderProductType)") | Out-Null }
+        if (`$state.TPExclusions -eq 1) { `$signals.Add('tamper-protected exclusions') | Out-Null }
+        `$state.ManagedDeviceWarning = "Managed Defender or device-management signals detected (`$(`$signals -join ', ')). Local changes may be ignored or reverted; consult your security administrator before disabling Defender."
+    }
+    return `$state
 }
 function Get-TxField {
     param(`$Entry, [string]`$Name, `$Default = `$null)
@@ -1798,6 +2110,8 @@ function New-DefenderControlManifest {
         firewallIntact  = `$null
         firewallDiffs   = @()
         thirdPartyAV    = @()
+        defenderStateBefore = `$null
+        defenderStateAfter  = `$null
         phasesCompleted = @()
         transactionLog  = @()
         finishedAt      = `$null
@@ -1930,6 +2244,7 @@ function Update-StatusAsync {
         Queue-Info "Querying current Defender status..."
         $enabled  = $true
         $tamperOn = $false
+        $mpStatus = $null
 
         # Dashboard defaults
         $rtpText = "OFF"; $rtpColor = "#e74c3c"
@@ -1939,6 +2254,10 @@ function Update-StatusAsync {
         $svcText = "Unknown"; $svcColor = "#7f8c8d"
         $antiSpyText = "Unknown"; $antiSpyColor = "#7f8c8d"
         $defUpdateText = "Unknown"; $defUpdateColor = "#7f8c8d"
+        $modeText = "Unknown"; $modeColor = "#7f8c8d"
+        $platformText = "Unknown"; $platformColor = "#7f8c8d"
+        $mdeText = "Not detected"; $mdeColor = "#7f8c8d"
+        $managedWarning = ""
 
         try {
             Queue-Verbose "  Calling Get-MpComputerStatus..."
@@ -1998,6 +2317,27 @@ function Update-StatusAsync {
             Queue-Warn "  Could not query Defender: $($_.Exception.Message)"
         }
 
+        $endpointState = Get-DefenderEndpointState -MpStatus $mpStatus
+        $modeText = $endpointState.DefenderMode
+        switch ($modeText) {
+            'Normal'        { $modeColor = "#2ecc71" }
+            'Passive'       { $modeColor = "#3498db" }
+            'EDR Block Mode' { $modeColor = "#9b59b6" }
+            'Disabled'      { $modeColor = "#e74c3c" }
+        }
+        if ($endpointState.DefenderPlatformVersion) { $platformText = $endpointState.DefenderPlatformVersion; $platformColor = "#3498db" }
+        if ($endpointState.MDEOnboarded) {
+            $mdeText = "Onboarded"
+            $mdeColor = "#e67e22"
+        } elseif ($endpointState.ForceDefenderPassiveMode -eq 1) {
+            $mdeText = "Passive policy"
+            $mdeColor = "#e67e22"
+        } elseif ($endpointState.MDEStatusKeyPresent) {
+            $mdeText = "Status key present"
+            $mdeColor = "#e67e22"
+        }
+        if ($endpointState.ManagedDevice) { $managedWarning = $endpointState.ManagedDeviceWarning }
+
         # Check DisableAntiSpyware registry
         try {
             $asReg = Get-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender" -Name "DisableAntiSpyware" -ErrorAction SilentlyContinue
@@ -2029,6 +2369,10 @@ function Update-StatusAsync {
             Queue-Verbose "  WinDefend service not found"
             $svcText = "Not Found"; $svcColor = "#e74c3c"
             $enabled = $false
+        }
+        if ($endpointState.DefenderMode -eq 'Unknown' -and -not $enabled) {
+            $modeText = "Disabled"
+            $modeColor = "#e74c3c"
         }
 
         # Firewall status
@@ -2095,6 +2439,10 @@ function Update-StatusAsync {
             -PplMsMpEng $pplMsMpEngText -PplMsMpEngColor $pplMsMpEngColor `
             -PplWdFilter $pplWdFilterText -PplWdFilterColor $pplWdFilterColor `
             -PplWdNisDrv $pplWdNisDrvText -PplWdNisDrvColor $pplWdNisDrvColor `
+            -DefenderMode $modeText -DefenderModeColor $modeColor `
+            -PlatformVersion $platformText -PlatformVersionColor $platformColor `
+            -MdeStatus $mdeText -MdeStatusColor $mdeColor `
+            -ManagedWarning $managedWarning `
             -ShowTamperWarning $tamperOn
 
         # Push main status
@@ -2144,6 +2492,17 @@ function Invoke-DisableDefender {
         $fwBefore = Get-FirewallSnapshot
         if ($manifest) { $manifest.firewallBefore = $fwBefore }
         Queue-Verbose "  Firewall snapshot captured ($($fwBefore.Count) fields)"
+
+        $endpointBefore = Get-DefenderEndpointState
+        if ($manifest) { $manifest.defenderStateBefore = $endpointBefore }
+        Queue-Info "  Defender mode: $($endpointBefore.DefenderMode) | Platform: $($endpointBefore.DefenderPlatformVersion)"
+        if ($endpointBefore.ManagedDevice) {
+            Queue-Warn "  ** MANAGED DEVICE / MDE SIGNAL DETECTED **"
+            Queue-Warn "  $($endpointBefore.ManagedDeviceWarning)"
+            Queue-Warn "  Review this with your security administrator before changing Defender services or policies."
+        } else {
+            Queue-Verbose "  No MDE or managed-device signals detected"
+        }
 
         $tpAv = Get-ThirdPartyAVList
         if ($manifest) {
@@ -2493,6 +2852,8 @@ function Invoke-DisableDefender {
         Start-Sleep -Milliseconds 60
 
         # -- Manifest: persist undo/audit manifest --------------------------------------
+        $endpointAfter = Get-DefenderEndpointState
+        if ($manifest) { $manifest.defenderStateAfter = $endpointAfter }
         $null = Save-DefenderControlManifest -Manifest $manifest
 
         # -- Final Status ----------------------------------------------------------------
@@ -2554,6 +2915,14 @@ function Invoke-EnableDefender {
         $fwBefore = Get-FirewallSnapshot
         if ($manifest) { $manifest.firewallBefore = $fwBefore }
         Queue-Verbose "Firewall snapshot captured ($($fwBefore.Count) fields)"
+
+        $endpointBefore = Get-DefenderEndpointState
+        if ($manifest) { $manifest.defenderStateBefore = $endpointBefore }
+        Queue-Info "  Defender mode: $($endpointBefore.DefenderMode) | Platform: $($endpointBefore.DefenderPlatformVersion)"
+        if ($endpointBefore.ManagedDevice) {
+            Queue-Warn "  ** MANAGED DEVICE / MDE SIGNAL DETECTED **"
+            Queue-Warn "  $($endpointBefore.ManagedDeviceWarning)"
+        }
 
         # Look for the latest Disable manifest to replay its transaction log
         $undoManifest = $null
@@ -2881,6 +3250,8 @@ function Invoke-EnableDefender {
         }
 
         # -- Manifest: persist undo/audit manifest --------------------------------------
+        $endpointAfter = Get-DefenderEndpointState
+        if ($manifest) { $manifest.defenderStateAfter = $endpointAfter }
         $null = Save-DefenderControlManifest -Manifest $manifest
 
         Queue-Info "============================================"
