@@ -139,7 +139,21 @@ Every Disable and Enable run writes a JSON audit manifest to `%ProgramData%\Defe
 ```powershell
 powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Manifest
 powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Manifest -Json
+
+# List manifests and show the default retention policy (30 days / 50 files)
+powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Manifest -ListManifests
+
+# Prune old manifests; the explicit age can be adjusted for this run
+powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Manifest -PruneManifests -RetentionDays 30
+
+# Export the latest manifest and operation logs with host/provider/registry data redacted
+powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Manifest -Redact -OutputPath "$env:USERPROFILE\Desktop\DefenderControl-Redacted.zip"
 ```
+
+Manifest retention defaults to 30 days and the newest 50 files. The GUI log
+controls provide **Manifests**, **Redact**, and **Prune** actions with the same
+policy. Redacted exports are ZIP archives containing a sanitized manifest and
+operation log; the original audit files are not modified.
 
 ### Support Bundles
 

@@ -101,6 +101,12 @@ param(
 
     [string]$OutputPath,
 
+    [switch]$ListManifests,
+    [switch]$PruneManifests,
+    [switch]$Redact,
+    [ValidateRange(1,3650)]
+    [int]$RetentionDays = 30,
+
     [ValidateSet('Enabled','Disabled','Auto')]
     [string]$Expect = 'Auto',
 
@@ -141,6 +147,12 @@ Defender Control - CLI Usage
     DefenderControl.ps1 -Mode Health -Json       Extended state as JSON
     DefenderControl.ps1 -Mode Manifest            Print the latest undo manifest
     DefenderControl.ps1 -Mode Manifest -Json      Latest manifest as JSON
+    DefenderControl.ps1 -Mode Manifest -ListManifests
+                                                   List manifests and retention policy
+    DefenderControl.ps1 -Mode Manifest -PruneManifests -RetentionDays 30
+                                                   Prune old manifests safely
+    DefenderControl.ps1 -Mode Manifest -Redact -OutputPath redacted.zip
+                                                   Export redacted manifests and logs
     DefenderControl.ps1 -Mode SupportBundle       Create a diagnostic support ZIP
     DefenderControl.ps1 -Mode SupportBundle -MpSupportFiles
                                                    Include MpCmdRun diagnostic CAB
@@ -163,6 +175,10 @@ Flags:
     -Force          Required with -Eicar to actually write the test file
     -OutputPath     SupportBundle destination ZIP (default: Desktop)
     -MpSupportFiles Include MpCmdRun.exe -GetFiles output in SupportBundle
+    -ListManifests  List all audit manifests and the retention policy
+    -PruneManifests Remove manifests outside the retention window / count
+    -Redact         Export a ZIP with redacted manifest and operation logs
+    -RetentionDays  Prune age limit in days (default: 30; max files: 50)
 
 Exit codes:
     0 success   1 partial   2 tamper-blocked   3 safe-mode-needed
@@ -270,6 +286,8 @@ if (-not $script:IsCliMode) {
 }
 
 $script:Version    = "3.3.2"
+$script:ManifestRetentionDays = 30
+$script:ManifestMaxCount = 50
 $script:DryRun     = [bool]$DryRun
 $script:ShowVerbose = $true
 
@@ -798,7 +816,11 @@ function Invoke-CliMode {
         [switch]$Eicar,
         [switch]$Force,
         [string]$OutputPath,
-        [switch]$MpSupportFiles
+        [switch]$MpSupportFiles,
+        [switch]$ListManifests,
+        [switch]$PruneManifests,
+        [switch]$Redact,
+        [int]$RetentionDays = 30
     )
 
     $script:Silent = $Silent.IsPresent
@@ -883,21 +905,88 @@ function Invoke-CliMode {
         }
 
         'Manifest' {
-            $dir = Join-Path $env:ProgramData 'DefenderControl\manifests'
-            if (-not (Test-Path $dir)) {
-                Write-CliLine "No manifests directory yet. Run a Disable/Enable first." -ErrorStream
+            $manifestActionCount = 0
+            if ($ListManifests.IsPresent) { $manifestActionCount++ }
+            if ($PruneManifests.IsPresent) { $manifestActionCount++ }
+            if ($Redact.IsPresent) { $manifestActionCount++ }
+            if ($manifestActionCount -gt 1) {
+                Write-CliLine 'DefenderControl: choose only one manifest action.' -ErrorStream
                 exit $script:EXIT_USAGE
             }
-            $latest = Get-ChildItem -Path $dir -Filter '*.json' -ErrorAction SilentlyContinue |
-                Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if ($RetentionDays -lt 1) {
+                Write-CliLine 'DefenderControl: -RetentionDays must be at least 1.' -ErrorStream
+                exit $script:EXIT_USAGE
+            }
+
+            if ($ListManifests.IsPresent) {
+                $summary = Get-DefenderControlManifestSummary
+                if ($Json.IsPresent) {
+                    [Console]::Out.WriteLine(($summary | ConvertTo-Json -Depth 6))
+                } else {
+                    Write-CliLine ("Manifest retention: {0} days; keep newest {1} files" -f `
+                        $summary.RetentionDays, $summary.MaxCount)
+                    Write-CliLine ("Manifest directory: {0}" -f $summary.Directory)
+                    Write-CliLine ("Manifests found: {0}" -f $summary.Count)
+                    foreach ($item in @($summary.Manifests)) {
+                        Write-CliLine ("  {0}  {1} bytes  {2}" -f $item.Name, $item.Length, $item.LastWriteTime)
+                    }
+                }
+                exit $script:EXIT_OK
+            }
+
+            if ($PruneManifests.IsPresent) {
+                $pruned = Remove-DefenderControlManifests -RetentionDays $RetentionDays
+                if ($Json.IsPresent) {
+                    [Console]::Out.WriteLine(($pruned | ConvertTo-Json -Depth 6))
+                } else {
+                    Write-CliLine ("Manifest retention: {0} days; keep newest {1} files" -f `
+                        $pruned.RetentionDays, $pruned.MaxCount)
+                    Write-CliLine ("Pruned {0} manifest(s); {1} remain." -f $pruned.RemovedCount, $pruned.RemainingCount)
+                    foreach ($removed in @($pruned.Removed)) { Write-CliLine ("  Removed: {0}" -f $removed) }
+                }
+                exit $script:EXIT_OK
+            }
+
+            if ($Redact.IsPresent) {
+                try {
+                    $redacted = Export-DefenderControlRedactedData -OutputPath $OutputPath
+                    if ($Json.IsPresent) {
+                        [Console]::Out.WriteLine(($redacted | ConvertTo-Json -Depth 6))
+                    } else {
+                        Write-CliLine ("Redacted export created: {0}" -f $redacted.Path)
+                        Write-CliLine ("Manifest included: {0}  Log included: {1}" -f `
+                            $redacted.ManifestIncluded, $redacted.LogIncluded)
+                        foreach ($warning in @($redacted.Warnings)) { Write-CliLine ("WARN: {0}" -f $warning) -ErrorStream }
+                    }
+                    exit $script:EXIT_OK
+                } catch {
+                    Write-CliLine ("DefenderControl: redacted export failed: {0}" -f $_.Exception.Message) -ErrorStream
+                    exit $script:EXIT_USAGE
+                }
+            }
+
+            $dir = Get-DefenderControlManifestDirectory
+            $latest = Get-DefenderControlManifestFiles | Select-Object -First 1
             if (-not $latest) {
                 Write-CliLine "No manifests found in $dir" -ErrorStream
                 exit $script:EXIT_USAGE
             }
-            $text = Get-Content -Raw -Path $latest.FullName
+            $text = Get-Content -Raw -LiteralPath $latest.FullName
             if ($Json.IsPresent) {
-                [Console]::Out.WriteLine($text)
+                try {
+                    $manifestObject = $text | ConvertFrom-Json
+                    $manifestObject | Add-Member -NotePropertyName retentionPolicy -NotePropertyValue ([ordered]@{
+                        days = $script:ManifestRetentionDays
+                        maxCount = $script:ManifestMaxCount
+                        redactionAvailable = $true
+                    }) -Force
+                    [Console]::Out.WriteLine(($manifestObject | ConvertTo-Json -Depth 12))
+                } catch {
+                    [Console]::Out.WriteLine($text)
+                }
             } else {
+                Write-CliLine ("Manifest retention: {0} days; keep newest {1} files" -f `
+                    $script:ManifestRetentionDays, $script:ManifestMaxCount)
                 Write-CliLine ("Latest manifest: " + $latest.FullName)
                 Write-CliLine '---'
                 [Console]::Out.WriteLine($text)
@@ -1174,9 +1263,272 @@ function New-DefenderControlSupportBundle {
     }
 }
 
+function Get-DefenderControlManifestDirectory {
+    [CmdletBinding()]
+    param([string]$Directory)
+    if ([string]::IsNullOrWhiteSpace($Directory)) {
+        $Directory = Join-Path $env:ProgramData 'DefenderControl\manifests'
+    }
+    return $Directory
+}
+
+function Get-DefenderControlManifestFiles {
+    [CmdletBinding()]
+    param([string]$Directory)
+    $Directory = Get-DefenderControlManifestDirectory -Directory $Directory
+    if (-not (Test-Path -LiteralPath $Directory -PathType Container)) { return @() }
+    return @(Get-ChildItem -LiteralPath $Directory -Filter '*.json' -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending)
+}
+
+function Get-DefenderControlManifestSummary {
+    [CmdletBinding()]
+    param([string]$Directory)
+    $Directory = Get-DefenderControlManifestDirectory -Directory $Directory
+    $files = @(Get-DefenderControlManifestFiles -Directory $Directory)
+    return [pscustomobject]@{
+        Directory = $Directory
+        RetentionDays = $script:ManifestRetentionDays
+        MaxCount = $script:ManifestMaxCount
+        Count = $files.Count
+        Manifests = @($files | ForEach-Object {
+            [ordered]@{
+                Name = $_.Name
+                FullName = $_.FullName
+                Length = $_.Length
+                LastWriteTime = $_.LastWriteTime.ToString('o')
+            }
+        })
+    }
+}
+
+function Remove-DefenderControlManifests {
+    [CmdletBinding()]
+    param(
+        [string]$Directory,
+        [ValidateRange(1,3650)][int]$RetentionDays = 30,
+        [ValidateRange(1,10000)][int]$MaxCount = 50
+    )
+
+    $Directory = Get-DefenderControlManifestDirectory -Directory $Directory
+    $files = @(Get-DefenderControlManifestFiles -Directory $Directory)
+    $cutoff = (Get-Date).AddDays(-$RetentionDays)
+    $candidates = @{}
+
+    foreach ($file in $files) {
+        if ($file.LastWriteTime -lt $cutoff) { $candidates[$file.FullName] = $file }
+    }
+    if ($files.Count -gt $MaxCount) {
+        foreach ($file in @($files | Select-Object -Skip $MaxCount)) {
+            $candidates[$file.FullName] = $file
+        }
+    }
+
+    $root = $null
+    if (Test-Path -LiteralPath $Directory -PathType Container) {
+        $root = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $Directory).ProviderPath).TrimEnd('\') + '\'
+    }
+    $removed = New-Object System.Collections.Generic.List[string]
+    foreach ($file in @($candidates.Values | Sort-Object FullName)) {
+        $target = [IO.Path]::GetFullPath($file.FullName)
+        if ($root -and -not $target.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Refusing to prune a manifest outside the manifest directory: $target"
+        }
+        Remove-Item -LiteralPath $target -Force -ErrorAction Stop
+        $removed.Add($file.Name) | Out-Null
+    }
+
+    return [pscustomobject]@{
+        Directory = $Directory
+        RetentionDays = $RetentionDays
+        MaxCount = $MaxCount
+        Cutoff = $cutoff.ToString('o')
+        RemovedCount = $removed.Count
+        Removed = @($removed)
+        RemainingCount = @((Get-DefenderControlManifestFiles -Directory $Directory)).Count
+    }
+}
+
+function ConvertTo-RedactedDefenderControlText {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object]$Text,
+        [string[]]$KnownHostNames
+    )
+    if ($null -eq $Text) { return $null }
+    $result = [string]$Text
+    if (-not [string]::IsNullOrWhiteSpace($env:COMPUTERNAME)) {
+        $result = $result -replace [regex]::Escape($env:COMPUTERNAME), '[REDACTED_HOST]'
+    }
+    foreach ($knownHost in @($KnownHostNames)) {
+        if (-not [string]::IsNullOrWhiteSpace($knownHost)) {
+            $result = $result -replace [regex]::Escape($knownHost), '[REDACTED_HOST]'
+        }
+    }
+    $result = $result -replace '(?i)[A-Z]:\\Users\\[^\\\s]+', '[REDACTED_USER_PATH]'
+    $result = $result -replace '(?i)(HKLM:|HKCU:|HKCR:|Registry::)[^\s,;]+', '[REDACTED_REGISTRY_PATH]'
+    return $result
+}
+
+function ConvertTo-RedactedDefenderControlValue {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object]$Value,
+        [string]$PropertyName = '',
+        [string[]]$KnownHostNames
+    )
+
+    if ($null -eq $Value) { return $null }
+    $property = [string]$PropertyName
+    if ($property -match '(?i)^(host|computer|computername|username|user|domain)$') {
+        return '[REDACTED]'
+    }
+    if ($property -match '(?i)(thirdpartyav|displayname|providername|avprovider)') {
+        return '[REDACTED_AV_PROVIDER]'
+    }
+    if ($property -match '(?i)(registrypath|providerpath|^path$|filepath|sourcepath)') {
+        return '[REDACTED_REGISTRY_PATH]'
+    }
+    if ($property -match '(?i)^(name|valuename|before|after|value|oldvalue|newvalue|defaultvalue)$') {
+        return '[REDACTED]'
+    }
+
+        if ($Value -is [string]) {
+        return ConvertTo-RedactedDefenderControlText -Text $Value -KnownHostNames $KnownHostNames
+    }
+    if ($Value -is [System.Collections.IDictionary]) {
+        $result = [ordered]@{}
+        foreach ($entry in $Value.GetEnumerator()) {
+            $result[[string]$entry.Key] = ConvertTo-RedactedDefenderControlValue `
+                -Value $entry.Value -PropertyName ([string]$entry.Key) -KnownHostNames $KnownHostNames
+        }
+        return $result
+    }
+    if (($Value -is [System.Collections.IEnumerable]) -and -not ($Value -is [string])) {
+        return @($Value | ForEach-Object {
+            ConvertTo-RedactedDefenderControlValue -Value $_ -PropertyName $PropertyName -KnownHostNames $KnownHostNames
+        })
+    }
+    if ($Value.PSObject -and $Value.PSObject.Properties.Count -gt 0 -and
+        -not ($Value -is [ValueType])) {
+        $result = [ordered]@{}
+        foreach ($propertyValue in $Value.PSObject.Properties) {
+            $result[$propertyValue.Name] = ConvertTo-RedactedDefenderControlValue `
+                -Value $propertyValue.Value -PropertyName $propertyValue.Name -KnownHostNames $KnownHostNames
+        }
+        return $result
+    }
+    return $Value
+}
+
+function Export-DefenderControlRedactedData {
+    [CmdletBinding()]
+    param(
+        [string]$OutputPath,
+        [string]$Directory,
+        [object[]]$LogEntries
+    )
+
+    $Directory = Get-DefenderControlManifestDirectory -Directory $Directory
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    if ([string]::IsNullOrWhiteSpace($OutputPath)) {
+        $desktop = [Environment]::GetFolderPath('Desktop')
+        if ([string]::IsNullOrWhiteSpace($desktop) -or -not (Test-Path -LiteralPath $desktop)) { $desktop = $env:TEMP }
+        $OutputPath = Join-Path $desktop "DefenderControl-Redacted-$stamp.zip"
+    } elseif (Test-Path -LiteralPath $OutputPath -PathType Container) {
+        $OutputPath = Join-Path $OutputPath "DefenderControl-Redacted-$stamp.zip"
+    } elseif ([IO.Path]::GetExtension($OutputPath) -ne '.zip') {
+        $OutputPath = "$OutputPath.zip"
+    }
+    $parent = Split-Path -Parent $OutputPath
+    if ([string]::IsNullOrWhiteSpace($parent)) { $parent = (Get-Location).ProviderPath }
+    if (-not (Test-Path -LiteralPath $parent)) { New-Item -Path $parent -ItemType Directory -Force | Out-Null }
+    $OutputPath = Join-Path $parent (Split-Path -Leaf $OutputPath)
+
+    $tempRoot = Join-Path $env:TEMP "DefenderControl-Redacted-$([guid]::NewGuid().ToString('N'))"
+    $stage = Join-Path $tempRoot 'export'
+    $warnings = New-Object System.Collections.Generic.List[string]
+    $manifestIncluded = $false
+    $logIncluded = $false
+    try {
+        New-Item -Path $stage -ItemType Directory -Force | Out-Null
+        $latest = Get-DefenderControlManifestFiles -Directory $Directory | Select-Object -First 1
+        if ($latest) {
+            try {
+                $manifest = Get-Content -Raw -LiteralPath $latest.FullName -ErrorAction Stop | ConvertFrom-Json
+                $knownHosts = @()
+                if ($manifest.host) { $knownHosts = @([string]$manifest.host) }
+                $redactedManifest = ConvertTo-RedactedDefenderControlValue `
+                    -Value $manifest -KnownHostNames $knownHosts
+                [IO.File]::WriteAllText((Join-Path $stage 'manifest-redacted.json'),
+                    ($redactedManifest | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
+                $manifestIncluded = $true
+            } catch {
+                $warnings.Add("Latest manifest could not be redacted: $($_.Exception.Message)") | Out-Null
+            }
+        } else {
+            $warnings.Add('No DefenderControl manifest was found.') | Out-Null
+        }
+
+        $redactedLines = New-Object System.Collections.Generic.List[string]
+        if ($null -ne $LogEntries) {
+            foreach ($entry in @($LogEntries)) {
+                $time = if ($entry.Time) { $entry.Time } else { '--:--:--' }
+                $message = if ($entry.Message) { $entry.Message } else { "$entry" }
+                $redactedLines.Add((ConvertTo-RedactedDefenderControlText -Text "[$time] $message")) | Out-Null
+            }
+        } else {
+            $logDir = Join-Path $env:ProgramData 'DefenderControl\logs'
+            $logFiles = @()
+            if (Test-Path -LiteralPath $logDir) {
+                $logFiles = @(Get-ChildItem -LiteralPath $logDir -Filter '*.log' -File -ErrorAction SilentlyContinue |
+                    Sort-Object LastWriteTime -Descending | Select-Object -First 10)
+            }
+            foreach ($logFile in $logFiles) {
+                $redactedLines.Add((ConvertTo-RedactedDefenderControlText -Text "--- $($logFile.Name) ---")) | Out-Null
+                foreach ($line in @(Get-Content -LiteralPath $logFile.FullName -ErrorAction SilentlyContinue)) {
+                    $redactedLines.Add((ConvertTo-RedactedDefenderControlText -Text $line)) | Out-Null
+                }
+            }
+        }
+        if ($redactedLines.Count -eq 0) {
+            $redactedLines.Add('No DefenderControl operation log entries were found.') | Out-Null
+            $warnings.Add('No DefenderControl operation log entries were found.') | Out-Null
+        }
+        [IO.File]::WriteAllLines((Join-Path $stage 'operation-log-redacted.txt'),
+            $redactedLines.ToArray(), [Text.UTF8Encoding]::new($false))
+        $logIncluded = $true
+
+        $metadata = [ordered]@{
+            schemaVersion = 1
+            generatedAt = (Get-Date).ToString('o')
+            redacted = $true
+            retentionPolicy = [ordered]@{
+                days = $script:ManifestRetentionDays
+                maxCount = $script:ManifestMaxCount
+            }
+            files = @('manifest-redacted.json', 'operation-log-redacted.txt')
+            warnings = @($warnings)
+        }
+        [IO.File]::WriteAllText((Join-Path $stage 'export-metadata.json'),
+            ($metadata | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
+        Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $OutputPath -Force
+        return [pscustomobject]@{
+            Path = (Resolve-Path -LiteralPath $OutputPath).ProviderPath
+            ManifestIncluded = $manifestIncluded
+            LogIncluded = $logIncluded
+            Warnings = @($warnings)
+        }
+    } finally {
+        if (Test-Path -LiteralPath $tempRoot) { Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
 if ($script:IsCliMode) {
     Invoke-CliMode -Mode $Mode -Expect $Expect -Json:$Json -Silent:$Silent -Eicar:$Eicar -Force:$Force `
-        -OutputPath $OutputPath -MpSupportFiles:$MpSupportFiles
+        -OutputPath $OutputPath -MpSupportFiles:$MpSupportFiles `
+        -ListManifests:$ListManifests -PruneManifests:$PruneManifests `
+        -Redact:$Redact -RetentionDays $RetentionDays
     # Invoke-CliMode always exits; defensive fall-through:
     exit $script:EXIT_USAGE
 }
@@ -1685,6 +2037,18 @@ try {
                         AutomationProperties.Name="Create Defender support bundle"
                         Background="#2a2a4a"
                         Style="{StaticResource SmallButton}" Margin="0,0,6,0"/>
+                <Button x:Name="btnListManifests" Content="Manifests"
+                        AutomationProperties.Name="List audit manifests"
+                        Background="#2a2a4a"
+                        Style="{StaticResource SmallButton}" Margin="0,0,6,0"/>
+                <Button x:Name="btnRedactExport" Content="Redact"
+                        AutomationProperties.Name="Export redacted manifests and logs"
+                        Background="#2a2a4a"
+                        Style="{StaticResource SmallButton}" Margin="0,0,6,0"/>
+                <Button x:Name="btnPruneManifests" Content="Prune"
+                        AutomationProperties.Name="Prune old audit manifests"
+                        Background="#2a2a4a"
+                        Style="{StaticResource SmallButton}" Margin="0,0,6,0"/>
                 <Button x:Name="btnClearLog" Content="Clear"
                         AutomationProperties.Name="Clear operation log"
                         Background="#2a2a4a"
@@ -1745,6 +2109,9 @@ $btnRefresh  = $window.FindName("btnRefresh")
 $btnReboot   = $window.FindName("btnReboot")
 $btnExport   = $window.FindName("btnExport")
 $btnSupportBundle = $window.FindName("btnSupportBundle")
+$btnListManifests = $window.FindName("btnListManifests")
+$btnRedactExport = $window.FindName("btnRedactExport")
+$btnPruneManifests = $window.FindName("btnPruneManifests")
 $btnClearLog = $window.FindName("btnClearLog")
 $chkDryRun   = $window.FindName("chkDryRun")
 $chkVerbose  = $window.FindName("chkVerbose")
@@ -2483,6 +2850,11 @@ function New-DefenderControlManifest {
         phasesCompleted = @()
         transactionLog  = @()
         finishedAt      = `$null
+        retentionPolicy = [ordered]@{
+            days = 30
+            maxCount = 50
+            redactionAvailable = `$true
+        }
         path            = `$file
     }
 }
@@ -3763,6 +4135,57 @@ $btnExport.Add_Click({
     }
 })
 
+$btnListManifests.Add_Click({
+    try {
+        $summary = Get-DefenderControlManifestSummary
+        Queue-Info ("Manifest retention: {0} days; keep newest {1} files; found {2}" -f `
+            $summary.RetentionDays, $summary.MaxCount, $summary.Count)
+        if ($summary.Count -eq 0) {
+            Queue-Info "  No audit manifests found. A Disable or Enable operation will create one."
+        } else {
+            foreach ($item in @($summary.Manifests)) {
+                Queue-Info ("  {0} ({1} bytes, {2})" -f $item.Name, $item.Length, $item.LastWriteTime)
+            }
+        }
+    } catch {
+        Queue-Err "Manifest listing failed: $($_.Exception.Message)"
+    }
+})
+
+$btnRedactExport.Add_Click({
+    if ($script:IsRunning) { return }
+    $dlg = [System.Windows.Forms.SaveFileDialog]::new()
+    $dlg.Title = "Export Redacted Defender Control Data"
+    $dlg.Filter = "ZIP Archives (*.zip)|*.zip|All Files (*.*)|*.*"
+    $dlg.FileName = "DefenderControl-Redacted-$(Get-Date -Format 'yyyyMMdd_HHmmss').zip"
+    $dlg.InitialDirectory = [Environment]::GetFolderPath("Desktop")
+    if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        try {
+            $redacted = Export-DefenderControlRedactedData `
+                -OutputPath $dlg.FileName -LogEntries @($script:AllLogEntries)
+            Queue-Success "Redacted export created: $($redacted.Path)"
+            foreach ($warning in @($redacted.Warnings)) { Queue-Warn "Redacted export: $warning" }
+        } catch {
+            Queue-Err "Redacted export failed: $($_.Exception.Message)"
+        }
+    }
+})
+
+$btnPruneManifests.Add_Click({
+    if ($script:IsRunning) { return }
+    $message = "Remove audit manifests older than $($script:ManifestRetentionDays) days and keep the newest $($script:ManifestMaxCount) files?`n`nThis only removes JSON files inside the DefenderControl manifest directory."
+    $choice = [System.Windows.MessageBox]::Show($message, "Prune Audit Manifests", "YesNo", "Warning")
+    if ($choice -ne "Yes") { return }
+    try {
+        $pruned = Remove-DefenderControlManifests `
+            -RetentionDays $script:ManifestRetentionDays -MaxCount $script:ManifestMaxCount
+        Queue-Success ("Pruned {0} manifest(s); {1} remain." -f $pruned.RemovedCount, $pruned.RemainingCount)
+        foreach ($removed in @($pruned.Removed)) { Queue-Verbose "  Removed: $removed" }
+    } catch {
+        Queue-Err "Manifest pruning failed: $($_.Exception.Message)"
+    }
+})
+
 $btnSupportBundle.Add_Click({
     if ($script:IsRunning) { return }
     $dlg = [System.Windows.Forms.SaveFileDialog]::new()
@@ -3902,6 +4325,7 @@ $window.Add_Loaded({
     Queue-Verbose "OS: $script:OSDetail"
     Queue-Verbose "PowerShell: $($PSVersionTable.PSVersion)"
     Queue-Verbose "Host: $env:COMPUTERNAME"
+    Queue-Info "Manifest retention: $($script:ManifestRetentionDays) days; keep newest $($script:ManifestMaxCount) files. Redacted export is available from the log controls."
     if ($script:OSBuild -ge 22621) {
         Queue-Verbose "Note: Win11 22H2+ detected - some GP keys are deprecated but still applied"
     }

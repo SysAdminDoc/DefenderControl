@@ -19,6 +19,9 @@ All notable changes to DefenderControl will be documented in this file.
 - WPF controls now expose stable automation names, while live status and
   dashboard values publish their current text as accessible state instead of
   relying on color alone.
+- Manifest management now supports listing, safe retention pruning, and
+  redacted ZIP export of the latest manifest and operation logs. The default
+  policy is 30 days and 50 newest files, and is shown in the GUI and CLI.
 
 ## [v3.3.2] - 2026-06-28
 

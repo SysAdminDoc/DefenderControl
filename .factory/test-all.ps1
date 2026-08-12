@@ -163,7 +163,7 @@ if ($supportFunction -and $sharedAssignment -and $supportAppend) {
 }
 
 Write-Check 'State, verify, transaction, and support tests'
-foreach ($testName in @('test-state.ps1', 'test-verify.ps1', 'test-undo-replay.ps1', 'test-support-bundle.ps1')) {
+foreach ($testName in @('test-state.ps1', 'test-verify.ps1', 'test-undo-replay.ps1', 'test-support-bundle.ps1', 'test-manifest-controls.ps1')) {
     $testPath = Join-Path $PSScriptRoot $testName
     if (-not (Test-Path -LiteralPath $testPath)) {
         Write-Host ("[FAIL] Missing validation script: {0}" -f $testName)
