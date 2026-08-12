@@ -2,7 +2,7 @@
 
 All notable changes to DefenderControl will be documented in this file.
 
-## Unreleased
+## [v3.3.3] - 2026-08-12
 
 ### Added
 - Defender for Endpoint/passive-mode preflight now reports normalized Defender

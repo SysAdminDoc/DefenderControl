@@ -3,7 +3,7 @@
 
 $ErrorActionPreference = 'Stop'
 
-$script:Version  = '3.3.2'
+$script:Version  = '3.3.3'
 $script:OSBuild  = 26100
 $script:OSDetail = "Windows 11 (Build $script:OSBuild)"
 
@@ -41,7 +41,7 @@ function Invoke-VerifyIsolated {
     $stateJson = $FakeState | ConvertTo-Json -Depth 6 -Compress
     $modeArgs = if ($WantJson) { "-Expect '$Expect' -Json" } else { "-Expect '$Expect'" }
     $script = @(
-        '$script:Version = ''3.3.2'''
+        '$script:Version = ''3.3.3'''
         '$script:OSBuild = 26100'
         '$script:OSDetail = ''Windows 11 (Build 26100)'''
         '$script:EXIT_OK = 0'
@@ -95,7 +95,7 @@ function Assert-ExitCode {
 }
 
 $enabled = @{
-    Version='3.3.2'; Timestamp=(Get-Date).ToString('o'); Computer='TEST'; OS='Win11'; OSBuild=26100
+    Version='3.3.3'; Timestamp=(Get-Date).ToString('o'); Computer='TEST'; OS='Win11'; OSBuild=26100
     RealTimeProtectionEnabled=$true; AntivirusEnabled=$true; AntispywareEnabled=$true
     BehaviorMonitorEnabled=$true; NISEnabled=$true; OnAccessProtectionEnabled=$true
     AMServiceEnabled=$true; IsTamperProtected=$false
@@ -104,7 +104,7 @@ $enabled = @{
 }
 
 $disabled = @{
-    Version='3.3.2'; Timestamp=(Get-Date).ToString('o'); Computer='TEST'; OS='Win11'; OSBuild=26100
+    Version='3.3.3'; Timestamp=(Get-Date).ToString('o'); Computer='TEST'; OS='Win11'; OSBuild=26100
     RealTimeProtectionEnabled=$false; AntivirusEnabled=$false; AntispywareEnabled=$false
     WinDefendStatus='Stopped'; WinDefendStartType='Disabled'; PolicyDisableAntiSpyware=1
     IsTamperProtected=$false; DefenderEffectivelyEnabled=$false

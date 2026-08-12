@@ -1,7 +1,7 @@
 # Isolated test harness for Get-DefenderState without triggering self-elevation
 # Runs only the state-query function after stubbing the script-scope vars it expects.
 
-$script:Version  = '3.3.2'
+$script:Version  = '3.3.3'
 $script:OSBuild  = [System.Environment]::OSVersion.Version.Build
 $script:OSName   = if ($script:OSBuild -ge 22000) { "Windows 11" } elseif ($script:OSBuild -ge 10240) { "Windows 10" } else { "Unknown" }
 $script:OSDetail = "$script:OSName (Build $script:OSBuild)"
