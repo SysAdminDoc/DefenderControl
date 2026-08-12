@@ -83,6 +83,30 @@ Assert-Check ($null -ne $mainAst) 'PowerShell parser accepts DefenderControl.ps1
 Invoke-ChildScript -Label 'Windows PowerShell 5.1 parser accepts DefenderControl.ps1' `
     -Path $PSCommandPath -Arguments @('-ParseOnly')
 
+$mainSource = Get-Content -Raw -LiteralPath $mainScript
+$xamlMatch = [regex]::Match($mainSource, '(?s)\[xml\]\$xaml = @"(.*?)"@')
+Assert-Check $xamlMatch.Success 'XAML here-string found'
+if ($xamlMatch.Success) {
+    try {
+        $xamlXml = [xml]$xamlMatch.Groups[1].Value
+        Assert-Check ($null -ne $xamlXml.DocumentElement) 'XAML is well-formed XML'
+        if (Get-Command Add-Type -ErrorAction SilentlyContinue) {
+            try {
+                Add-Type -AssemblyName PresentationFramework,PresentationCore,WindowsBase
+                $xamlReader = New-Object System.Xml.XmlNodeReader $xamlXml
+                $null = [Windows.Markup.XamlReader]::Load($xamlReader)
+                Assert-Check $true 'WPF XAML loader accepts accessibility metadata'
+            } catch {
+                Assert-Check $false ("WPF XAML loader accepts accessibility metadata: {0}" -f $_.Exception.Message)
+            }
+        }
+        $automationCount = ([regex]::Matches($xamlMatch.Groups[1].Value, 'AutomationProperties\.')).Count
+        Assert-Check ($automationCount -ge 30) ("XAML exposes broad AutomationProperties metadata ({0} attributes)" -f $automationCount)
+    } catch {
+        Assert-Check $false ("XAML XML parse: {0}" -f $_.Exception.Message)
+    }
+}
+
 Write-Check 'SharedFunctions extraction and parity'
 $assignments = @($mainAst.FindAll({
         param($node)

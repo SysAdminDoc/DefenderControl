@@ -16,6 +16,9 @@ All notable changes to DefenderControl will be documented in this file.
 - A single `.factory\test-all.ps1` command now runs WinPS parsing, shared
   runspace-function parity, state/verify/transaction/support tests, and
   PSScriptAnalyzer with documented legacy baseline suppressions.
+- WPF controls now expose stable automation names, while live status and
+  dashboard values publish their current text as accessible state instead of
+  relying on color alone.
 
 ## [v3.3.2] - 2026-06-28
 

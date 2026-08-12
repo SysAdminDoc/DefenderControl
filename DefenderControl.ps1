@@ -1224,6 +1224,7 @@ try {
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Defender Control"
+        AutomationProperties.Name="Defender Control"
         Width="880" Height="920"
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanMinimize"
@@ -1420,6 +1421,8 @@ try {
                 <TextBlock x:Name="txtSubtitle" Text="" FontSize="12" Foreground="{StaticResource TextDim}"/>
             </StackPanel>
             <CheckBox x:Name="chkDryRun" Content=" Dry Run (simulate only)"
+                      AutomationProperties.Name="Dry run mode"
+                      AutomationProperties.HelpText="Simulate the operation without changing Defender settings"
                       Style="{StaticResource DarkCheck}" HorizontalAlignment="Right"
                       VerticalAlignment="Center"/>
         </Grid>
@@ -1434,19 +1437,31 @@ try {
                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
                     <TextBlock Text="Defender Status" FontSize="13"
                                Foreground="{StaticResource TextSecondary}" Margin="0,0,0,3"/>
-                    <TextBlock x:Name="txtStatus" Text="Checking..." FontSize="20" FontWeight="Bold"
+                    <TextBlock x:Name="txtStatus" Text="Checking..."
+                               AutomationProperties.Name="Defender status: checking"
+                               FontSize="20" FontWeight="Bold"
                                Foreground="{StaticResource AccentOrange}"/>
-                    <TextBlock x:Name="txtTamper" Text="" FontSize="12"
+                    <TextBlock x:Name="txtTamper" Text=""
+                               AutomationProperties.Name="Tamper protection status"
+                               FontSize="12"
                                Foreground="{StaticResource TextDim}" Margin="0,3,0,0"/>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button x:Name="btnRefresh" Content="Refresh" Background="#2a2a4a"
+                    <Button x:Name="btnRefresh" Content="Refresh"
+                            AutomationProperties.Name="Refresh Defender status"
+                            Background="#2a2a4a"
                             Style="{StaticResource SmallButton}" Margin="0,0,8,0"/>
-                    <Button x:Name="btnDisable" Content="  Disable Defender  " Background="{StaticResource AccentRed}"
+                    <Button x:Name="btnDisable" Content="  Disable Defender  "
+                            AutomationProperties.Name="Disable Defender"
+                            Background="{StaticResource AccentRed}"
                             Style="{StaticResource ActionButton}"/>
-                    <Button x:Name="btnEnable" Content="  Enable Defender  " Background="{StaticResource AccentGreen}"
+                    <Button x:Name="btnEnable" Content="  Enable Defender  "
+                            AutomationProperties.Name="Enable Defender"
+                            Background="{StaticResource AccentGreen}"
                             Style="{StaticResource ActionButton}" Margin="8,0,0,0"/>
-                    <Button x:Name="btnReboot" Content="  Reboot Now  " Background="#8e44ad"
+                    <Button x:Name="btnReboot" Content="  Reboot Now  "
+                            AutomationProperties.Name="Reboot now"
+                            Background="#8e44ad"
                             Style="{StaticResource ActionButton}" Margin="8,0,0,0" Visibility="Collapsed"/>
                 </StackPanel>
             </Grid>
@@ -1475,67 +1490,82 @@ try {
                     <!-- Row 0 -->
                     <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,12,6">
                         <TextBlock Text="Real-Time Protection" FontSize="11" Foreground="{StaticResource TextDim}"/>
-                        <TextBlock x:Name="dashRTP" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
+                        <TextBlock x:Name="dashRTP" Text="--" AutomationProperties.Name="Real-time protection status"
+                                   FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
                     </StackPanel>
                     <StackPanel Grid.Row="0" Grid.Column="1" Margin="0,0,12,6">
                         <TextBlock Text="Tamper Protection" FontSize="11" Foreground="{StaticResource TextDim}"/>
-                        <TextBlock x:Name="dashTamper" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
+                        <TextBlock x:Name="dashTamper" Text="--" AutomationProperties.Name="Tamper protection status"
+                                   FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
                     </StackPanel>
                     <StackPanel Grid.Row="0" Grid.Column="2" Margin="0,0,12,6">
                         <TextBlock Text="Cloud Protection" FontSize="11" Foreground="{StaticResource TextDim}"/>
-                        <TextBlock x:Name="dashCloud" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
+                        <TextBlock x:Name="dashCloud" Text="--" AutomationProperties.Name="Cloud protection status"
+                                   FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
                     </StackPanel>
 
                     <!-- Row 1 -->
                     <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,0,12,6">
                         <TextBlock Text="Firewall" FontSize="11" Foreground="{StaticResource TextDim}"/>
-                        <TextBlock x:Name="dashFirewall" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
+                        <TextBlock x:Name="dashFirewall" Text="--" AutomationProperties.Name="Firewall status"
+                                   FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
                     </StackPanel>
                     <StackPanel Grid.Row="1" Grid.Column="1" Margin="0,0,12,6">
                         <TextBlock Text="Defender Service (WinDefend)" FontSize="11" Foreground="{StaticResource TextDim}"/>
-                        <TextBlock x:Name="dashService" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
+                        <TextBlock x:Name="dashService" Text="--" AutomationProperties.Name="Defender service status"
+                                   FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
                     </StackPanel>
                     <StackPanel Grid.Row="1" Grid.Column="2" Margin="0,0,12,6">
                         <TextBlock Text="Anti-Spyware Status" FontSize="11" Foreground="{StaticResource TextDim}"/>
-                        <TextBlock x:Name="dashAntiSpy" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
+                        <TextBlock x:Name="dashAntiSpy" Text="--" AutomationProperties.Name="Anti-spyware status"
+                                   FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
                     </StackPanel>
 
                     <!-- Row 2: PPL Status -->
                     <StackPanel Grid.Row="2" Grid.Column="0" Margin="0,0,12,6">
                         <TextBlock Text="PPL: MsMpEng" FontSize="11" Foreground="{StaticResource TextDim}"/>
-                        <TextBlock x:Name="dashPplMsMpEng" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
+                        <TextBlock x:Name="dashPplMsMpEng" Text="--" AutomationProperties.Name="MsMpEng protected process status"
+                                   FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
                     </StackPanel>
                     <StackPanel Grid.Row="2" Grid.Column="1" Margin="0,0,12,6">
                         <TextBlock Text="PPL: WdFilter / WdBoot" FontSize="11" Foreground="{StaticResource TextDim}"/>
-                        <TextBlock x:Name="dashPplWdFilter" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
+                        <TextBlock x:Name="dashPplWdFilter" Text="--" AutomationProperties.Name="WdFilter and WdBoot protected process status"
+                                   FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
                     </StackPanel>
                     <StackPanel Grid.Row="2" Grid.Column="2" Margin="0,0,12,6">
                         <TextBlock Text="PPL: WdNisDrv" FontSize="11" Foreground="{StaticResource TextDim}"/>
-                        <TextBlock x:Name="dashPplWdNisDrv" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
+                        <TextBlock x:Name="dashPplWdNisDrv" Text="--" AutomationProperties.Name="WdNisDrv protected process status"
+                                   FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
                     </StackPanel>
 
                     <!-- Row 3: Defender for Endpoint / passive mode -->
                     <StackPanel Grid.Row="3" Grid.Column="0" Margin="0,0,12,6">
                         <TextBlock Text="Defender Mode" FontSize="11" Foreground="{StaticResource TextDim}"/>
-                        <TextBlock x:Name="dashMode" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
+                        <TextBlock x:Name="dashMode" Text="--" AutomationProperties.Name="Defender mode"
+                                   FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
                     </StackPanel>
                     <StackPanel Grid.Row="3" Grid.Column="1" Margin="0,0,12,6">
                         <TextBlock Text="Platform Version" FontSize="11" Foreground="{StaticResource TextDim}"/>
-                        <TextBlock x:Name="dashPlatform" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
+                        <TextBlock x:Name="dashPlatform" Text="--" AutomationProperties.Name="Defender platform version"
+                                   FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
                     </StackPanel>
                     <StackPanel Grid.Row="3" Grid.Column="2" Margin="0,0,12,6">
                         <TextBlock Text="MDE / Managed Signals" FontSize="11" Foreground="{StaticResource TextDim}"/>
-                        <TextBlock x:Name="dashMde" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
+                        <TextBlock x:Name="dashMde" Text="--" AutomationProperties.Name="Defender for Endpoint and managed signals"
+                                   FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
                     </StackPanel>
 
                     <!-- Row 4 -->
                     <StackPanel Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,0,12,0">
                         <TextBlock Text="Last Definition Update" FontSize="11" Foreground="{StaticResource TextDim}"/>
-                        <TextBlock x:Name="dashDefUpdate" Text="--" FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
+                        <TextBlock x:Name="dashDefUpdate" Text="--" AutomationProperties.Name="Last Defender definition update"
+                                   FontSize="13" FontWeight="SemiBold" Foreground="#7f8c8d"/>
                     </StackPanel>
 
                     <!-- Refresh Dashboard button -->
-                    <Button x:Name="btnRefreshDash" Content="Refresh Status" Background="#2a2a4a"
+                    <Button x:Name="btnRefreshDash" Content="Refresh Status"
+                            AutomationProperties.Name="Refresh live Defender status"
+                            Background="#2a2a4a"
                             Style="{StaticResource SmallButton}" Grid.Row="0" Grid.Column="3"
                             VerticalAlignment="Top" Margin="4,0,0,0"/>
                 </Grid>
@@ -1544,6 +1574,7 @@ try {
 
         <!-- Tamper Protection Warning Panel (hidden by default) -->
         <Border x:Name="tamperWarningPanel" Grid.Row="3" Visibility="Collapsed"
+                AutomationProperties.Name="Tamper protection warning"
                 Background="#2d1a1a" BorderBrush="#e74c3c" BorderThickness="1"
                 CornerRadius="10" Padding="16,12" Margin="0,0,0,8">
             <StackPanel>
@@ -1563,19 +1594,24 @@ try {
                            Text="4. Scroll down to 'Tamper Protection' and toggle it OFF"/>
                 <TextBlock FontSize="12" Foreground="#b0bec5" Margin="12,2,0,0"
                            Text="5. Click 'Refresh Status' above to update the dashboard"/>
-                <Button x:Name="btnOpenWSecurity" Content="Open Windows Security" Background="#3a2020"
+                <Button x:Name="btnOpenWSecurity" Content="Open Windows Security"
+                        AutomationProperties.Name="Open Windows Security"
+                        Background="#3a2020"
                         Style="{StaticResource SmallButton}" HorizontalAlignment="Left" Margin="0,8,0,0"/>
             </StackPanel>
         </Border>
 
         <!-- Managed device warning panel (hidden by default) -->
         <Border x:Name="managedWarningPanel" Grid.Row="4" Visibility="Collapsed"
+                AutomationProperties.Name="Managed Defender warning"
                 Background="#2d2418" BorderBrush="#e67e22" BorderThickness="1"
                 CornerRadius="10" Padding="16,12" Margin="0,0,0,8">
             <StackPanel>
                 <TextBlock Text="!! MANAGED DEFENDER SIGNALS DETECTED !!" FontSize="14" FontWeight="Bold"
                            Foreground="#e67e22" Margin="0,0,0,6"/>
-                <TextBlock x:Name="txtManagedWarning" TextWrapping="Wrap" FontSize="12" Foreground="#f0c58a"/>
+                <TextBlock x:Name="txtManagedWarning" TextWrapping="Wrap"
+                           AutomationProperties.Name="Managed Defender warning details"
+                           FontSize="12" Foreground="#f0c58a"/>
                 <TextBlock Text="Disable/Enable operations may be overridden by Microsoft Defender for Endpoint, Intune, or other device policy. Contact your security administrator before proceeding."
                            TextWrapping="Wrap" FontSize="12" Foreground="#ecf0f1" Margin="0,8,0,0"/>
             </StackPanel>
@@ -1595,6 +1631,7 @@ try {
                            Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center"
                            Margin="0,0,8,0"/>
                 <ComboBox x:Name="cmbScheduleHours" Grid.Column="1"
+                          AutomationProperties.Name="Re-enable schedule duration"
                           Style="{StaticResource DarkComboBox}" Width="80" Margin="0,0,8,0">
                     <ComboBoxItem Content="1 hour" IsSelected="True"/>
                     <ComboBoxItem Content="2 hours"/>
@@ -1602,11 +1639,17 @@ try {
                     <ComboBoxItem Content="8 hours"/>
                     <ComboBoxItem Content="24 hours"/>
                 </ComboBox>
-                <Button x:Name="btnSchedule" Content="Schedule" Background="#8e44ad"
+                <Button x:Name="btnSchedule" Content="Schedule"
+                        AutomationProperties.Name="Schedule Defender re-enable"
+                        Background="#8e44ad"
                         Style="{StaticResource SmallButton}" Grid.Column="2" Margin="0,0,8,0"/>
-                <TextBlock x:Name="txtScheduleStatus" Grid.Column="3" Text="" FontSize="11"
+                <TextBlock x:Name="txtScheduleStatus" Grid.Column="3" Text=""
+                           AutomationProperties.Name="Re-enable schedule status"
+                           FontSize="11"
                            Foreground="{StaticResource TextDim}" VerticalAlignment="Center"/>
-                <Button x:Name="btnCancelSchedule" Content="Cancel" Background="#c0392b"
+                <Button x:Name="btnCancelSchedule" Content="Cancel"
+                        AutomationProperties.Name="Cancel Defender re-enable schedule"
+                        Background="#c0392b"
                         Style="{StaticResource SmallButton}" Grid.Column="4" Visibility="Collapsed"/>
             </Grid>
         </Border>
@@ -1614,6 +1657,7 @@ try {
         <!-- Progress Bar -->
         <Border Grid.Row="6" Background="#16213e" CornerRadius="4" Height="6" Margin="0,0,0,8">
             <ProgressBar x:Name="progressBar" Minimum="0" Maximum="100" Value="0"
+                         AutomationProperties.Name="Defender operation progress"
                          Height="6" Background="Transparent" Foreground="#3498db"
                          BorderThickness="0"/>
         </Border>
@@ -1623,18 +1667,27 @@ try {
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                 <TextBlock Text="Operation Log" FontSize="13" FontWeight="SemiBold"
                            Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center"/>
-                <TextBlock x:Name="txtRunning" Text="" FontSize="12"
+                <TextBlock x:Name="txtRunning" Text=""
+                           AutomationProperties.Name="Current Defender operation"
+                           FontSize="12"
                            Foreground="{StaticResource AccentOrange}" Margin="12,0,0,0"
                            VerticalAlignment="Center"/>
             </StackPanel>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                 <CheckBox x:Name="chkVerbose" Content=" Verbose" IsChecked="True"
+                          AutomationProperties.Name="Show verbose operation log entries"
                           Style="{StaticResource DarkCheck}" Margin="0,0,12,0"/>
-                <Button x:Name="btnExport" Content="Export" Background="#2a2a4a"
+                <Button x:Name="btnExport" Content="Export"
+                        AutomationProperties.Name="Export operation log"
+                        Background="#2a2a4a"
                         Style="{StaticResource SmallButton}" Margin="0,0,6,0"/>
-                <Button x:Name="btnSupportBundle" Content="Support Bundle" Background="#2a2a4a"
+                <Button x:Name="btnSupportBundle" Content="Support Bundle"
+                        AutomationProperties.Name="Create Defender support bundle"
+                        Background="#2a2a4a"
                         Style="{StaticResource SmallButton}" Margin="0,0,6,0"/>
-                <Button x:Name="btnClearLog" Content="Clear" Background="#2a2a4a"
+                <Button x:Name="btnClearLog" Content="Clear"
+                        AutomationProperties.Name="Clear operation log"
+                        Background="#2a2a4a"
                         Style="{StaticResource SmallButton}"/>
             </StackPanel>
         </Grid>
@@ -1642,8 +1695,10 @@ try {
         <!-- Log Body -->
         <Border Grid.Row="8" Style="{StaticResource Card}" Margin="0,6,0,0">
             <Border Background="#0f1729" CornerRadius="6" Padding="4">
-                <ScrollViewer x:Name="logScroll" VerticalScrollBarVisibility="Auto">
-                    <RichTextBox x:Name="rtbLog" Background="Transparent" BorderThickness="0"
+                <ScrollViewer x:Name="logScroll" AutomationProperties.Name="Operation log scroll area"
+                              VerticalScrollBarVisibility="Auto">
+                    <RichTextBox x:Name="rtbLog" AutomationProperties.Name="Defender operation log"
+                                 Background="Transparent" BorderThickness="0"
                                  IsReadOnly="True" FontFamily="Cascadia Code,Consolas,Courier New"
                                  FontSize="12" Foreground="#b0bec5" VerticalScrollBarVisibility="Disabled"
                                  Padding="10,6">
@@ -1726,6 +1781,23 @@ $btnCancelSchedule = $window.FindName("btnCancelSchedule")
 # Set dynamic text
 $txtSubtitle.Text = "Comprehensive Microsoft Defender Management  |  $script:OSDetail"
 $txtVersion.Text  = "v$script:Version  |  Running as Administrator"
+
+function Set-AutomationStateName {
+    param(
+        [Parameter(Mandatory)][object]$Element,
+        [Parameter(Mandatory)][string]$Label,
+        [AllowNull()][object]$Value
+    )
+    $display = [string]$Value
+    if ([string]::IsNullOrWhiteSpace($display)) { $display = 'unknown' }
+    [System.Windows.Automation.AutomationProperties]::SetName(
+        $Element, ("{0}: {1}" -f $Label, $display))
+}
+
+Set-AutomationStateName $txtStatus 'Defender status' $txtStatus.Text
+Set-AutomationStateName $txtTamper 'Tamper protection' $txtTamper.Text
+Set-AutomationStateName $txtRunning 'Current Defender operation' $txtRunning.Text
+Set-AutomationStateName $txtScheduleStatus 'Re-enable schedule' $txtScheduleStatus.Text
 
 # ==================================================================================
 #  THREAD-SAFE QUEUES & LOG STORAGE
@@ -1839,16 +1911,21 @@ $script:uiTimer.Add_Tick({
         if ($st.StatusText) {
             $txtStatus.Text = $st.StatusText
             $txtStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString($st.StatusColor)
+            Set-AutomationStateName $txtStatus 'Defender status' $st.StatusText
         }
         if ($null -ne $st.TamperText -and $st.TamperText -ne "") {
             $txtTamper.Text = $st.TamperText
             $txtTamper.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString($st.TamperColor)
+            Set-AutomationStateName $txtTamper 'Tamper protection' $st.TamperText
+        } else {
+            Set-AutomationStateName $txtTamper 'Tamper protection' 'not reported'
         }
         $btnDisable.IsEnabled = $st.DisableBtn
         $btnEnable.IsEnabled  = $st.EnableBtn
         $btnRefresh.IsEnabled = (-not $script:IsRunning)
         if ($st.Progress -ge 0) { $progressBar.Value = $st.Progress }
         $txtRunning.Text = $st.RunningText
+        Set-AutomationStateName $txtRunning 'Current Defender operation' $st.RunningText
         if ($st.ShowReboot -eq "show")    { $btnReboot.Visibility = "Visible" }
         if ($st.ShowReboot -eq "hide")    { $btnReboot.Visibility = "Collapsed" }
     }
@@ -1859,41 +1936,54 @@ $script:uiTimer.Add_Tick({
         $bc = [System.Windows.Media.BrushConverter]::new()
         $dashRTP.Text = $dsh.RTP
         $dashRTP.Foreground = $bc.ConvertFromString($dsh.RTPColor)
+        Set-AutomationStateName $dashRTP 'Real-time protection' $dsh.RTP
         $dashTamper.Text = $dsh.Tamper
         $dashTamper.Foreground = $bc.ConvertFromString($dsh.TamperColor)
+        Set-AutomationStateName $dashTamper 'Tamper protection' $dsh.Tamper
         $dashCloud.Text = $dsh.Cloud
         $dashCloud.Foreground = $bc.ConvertFromString($dsh.CloudColor)
+        Set-AutomationStateName $dashCloud 'Cloud protection' $dsh.Cloud
         $dashFirewall.Text = $dsh.Firewall
         $dashFirewall.Foreground = $bc.ConvertFromString($dsh.FirewallColor)
+        Set-AutomationStateName $dashFirewall 'Firewall' $dsh.Firewall
         $dashService.Text = $dsh.Service
         $dashService.Foreground = $bc.ConvertFromString($dsh.ServiceColor)
+        Set-AutomationStateName $dashService 'Defender service' $dsh.Service
         $dashAntiSpy.Text = $dsh.AntiSpy
         $dashAntiSpy.Foreground = $bc.ConvertFromString($dsh.AntiSpyColor)
+        Set-AutomationStateName $dashAntiSpy 'Anti-spyware' $dsh.AntiSpy
         $dashDefUpdate.Text = $dsh.DefUpdate
         $dashDefUpdate.Foreground = $bc.ConvertFromString($dsh.DefUpdateColor)
+        Set-AutomationStateName $dashDefUpdate 'Last Defender definition update' $dsh.DefUpdate
         if ($dsh.PplMsMpEng) {
             $dashPplMsMpEng.Text = $dsh.PplMsMpEng
             $dashPplMsMpEng.Foreground = $bc.ConvertFromString($dsh.PplMsMpEngColor)
+            Set-AutomationStateName $dashPplMsMpEng 'MsMpEng protected process' $dsh.PplMsMpEng
         }
         if ($dsh.PplWdFilter) {
             $dashPplWdFilter.Text = $dsh.PplWdFilter
             $dashPplWdFilter.Foreground = $bc.ConvertFromString($dsh.PplWdFilterColor)
+            Set-AutomationStateName $dashPplWdFilter 'WdFilter and WdBoot protected process' $dsh.PplWdFilter
         }
         if ($dsh.PplWdNisDrv) {
             $dashPplWdNisDrv.Text = $dsh.PplWdNisDrv
             $dashPplWdNisDrv.Foreground = $bc.ConvertFromString($dsh.PplWdNisDrvColor)
+            Set-AutomationStateName $dashPplWdNisDrv 'WdNisDrv protected process' $dsh.PplWdNisDrv
         }
         if ($dsh.DefenderMode) {
             $dashMode.Text = $dsh.DefenderMode
             $dashMode.Foreground = $bc.ConvertFromString($dsh.DefenderModeColor)
+            Set-AutomationStateName $dashMode 'Defender mode' $dsh.DefenderMode
         }
         if ($dsh.PlatformVersion) {
             $dashPlatform.Text = $dsh.PlatformVersion
             $dashPlatform.Foreground = $bc.ConvertFromString($dsh.PlatformVersionColor)
+            Set-AutomationStateName $dashPlatform 'Defender platform version' $dsh.PlatformVersion
         }
         if ($dsh.MdeStatus) {
             $dashMde.Text = $dsh.MdeStatus
             $dashMde.Foreground = $bc.ConvertFromString($dsh.MdeStatusColor)
+            Set-AutomationStateName $dashMde 'Defender for Endpoint and managed signals' $dsh.MdeStatus
         }
         if ($dsh.ShowTamperWarning) {
             $tamperWarningPanel.Visibility = "Visible"
@@ -1905,9 +1995,11 @@ $script:uiTimer.Add_Tick({
         if ($dsh.ManagedWarning) {
             $txtManagedWarning.Text = $dsh.ManagedWarning
             $managedWarningPanel.Visibility = "Visible"
+            Set-AutomationStateName $txtManagedWarning 'Managed Defender warning' $dsh.ManagedWarning
         } else {
             $txtManagedWarning.Text = ""
             $managedWarningPanel.Visibility = "Collapsed"
+            Set-AutomationStateName $txtManagedWarning 'Managed Defender warning' 'none'
         }
     }
 })
@@ -3596,13 +3688,16 @@ function Update-ScheduleStatus {
             } else {
                 $txtScheduleStatus.Text = "Re-enable task is scheduled"
             }
+            Set-AutomationStateName $txtScheduleStatus 'Re-enable schedule' $txtScheduleStatus.Text
             $btnCancelSchedule.Visibility = "Visible"
         } else {
             $txtScheduleStatus.Text = ""
+            Set-AutomationStateName $txtScheduleStatus 'Re-enable schedule' 'not scheduled'
             $btnCancelSchedule.Visibility = "Collapsed"
         }
     } catch {
         $txtScheduleStatus.Text = ""
+        Set-AutomationStateName $txtScheduleStatus 'Re-enable schedule' 'unavailable'
         $btnCancelSchedule.Visibility = "Collapsed"
     }
 }
