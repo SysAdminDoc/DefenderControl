@@ -8,6 +8,7 @@ CODEX_CHANGELOG.md
 .codex/
 .factory/*
 !.factory/build-release.ps1
+!.factory/test-*.ps1
 dist/
 
 # Markdown files local-only (except README)

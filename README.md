@@ -152,6 +152,18 @@ run Microsoft's `MpCmdRun.exe -GetFiles` and include `MpSupportFiles.cab` when
 the Defender tool is available. The bundle is written to the Desktop by
 default; `-OutputPath` selects another ZIP path.
 
+### Local Validation
+
+Run the full local validation harness from the repository root:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".factory\test-all.ps1"
+```
+
+The harness checks both PowerShell parsers, validates the functions injected
+into GUI runspaces, runs the isolated state/verify/transaction/support tests,
+and fails on any PSScriptAnalyzer rule not listed as a documented baseline.
+
 ### Portable Release ZIP
 
 Build the local release asset from the repository root:

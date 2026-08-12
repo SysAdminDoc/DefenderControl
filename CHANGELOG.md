@@ -13,6 +13,9 @@ All notable changes to DefenderControl will be documented in this file.
   Bundles include extended Health JSON, the latest manifest, operation log,
   recent DefenderControl Application events, crash logs, and optional
   `MpSupportFiles.cab` collection through `MpCmdRun.exe -GetFiles`.
+- A single `.factory\test-all.ps1` command now runs WinPS parsing, shared
+  runspace-function parity, state/verify/transaction/support tests, and
+  PSScriptAnalyzer with documented legacy baseline suppressions.
 
 ## [v3.3.2] - 2026-06-28
 

@@ -4,13 +4,6 @@ Actionable work only. Historical and completed roadmap material is archived in C
 
 ## Actionable Items
 
-- [ ] P1 - Formalize local validation harness
-  Why: Current `.factory` scripts cover isolated state/verify paths but not runspace shared-function parity, linting, or transaction replay.
-  Evidence: `.factory\test-state.ps1`; `.factory\test-verify.ps1`; Pester and PSScriptAnalyzer docs
-  Touches: `.factory`, `DefenderControl.ps1`
-  Acceptance: One local test command runs parse checks, SharedFunctions extraction/parity checks, verify/state tests, transaction replay tests, and PSScriptAnalyzer with documented suppressions.
-  Complexity: M
-
 - [ ] P2 - Add WPF accessibility metadata
   Why: The dashboard is color-heavy and the XAML lacks broad `AutomationProperties.Name` coverage.
   Evidence: `DefenderControl.ps1:981`; Microsoft WPF AutomationProperties guidance
