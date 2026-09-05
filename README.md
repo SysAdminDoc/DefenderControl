@@ -1,284 +1,258 @@
-# Defender Control
+<p align="center">
+  <img src="assets/icons/defender-control-128.png" alt="DefenderControl shield and restore mark" width="96">
+</p>
 
-A professional PowerShell WPF utility to comprehensively disable or re-enable Microsoft Defender on Windows 10/11. Dark-themed GUI with fully async operations, detailed logging, and complete reversibility.
+<h1 align="center">DefenderControl</h1>
 
-![PowerShell](https://img.shields.io/badge/PowerShell-5.1-blue?logo=powershell&logoColor=white)
-![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?logo=windows&logoColor=white)
-![Version](https://img.shields.io/badge/Version-v3.3.3-informational)
-![License](https://img.shields.io/badge/License-MIT-green)
+<p align="center"><strong>A guarded maintenance switch for Microsoft Defender.</strong></p>
 
----
+<p align="center">
+  Inspect the current protection state, make a controlled change, and keep a clear path back.
+</p>
 
-## Why This Exists
+<p align="center">
+  <img src="https://img.shields.io/badge/version-3.3.4-4da3ff?style=flat-square" alt="Version 3.3.4">
+  <img src="https://img.shields.io/badge/license-MIT-2dd47a?style=flat-square" alt="MIT License">
+  <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?style=flat-square&amp;logo=windows" alt="Windows 10 and 11">
+  <img src="https://img.shields.io/badge/PowerShell-5.1-5391FE?style=flat-square&amp;logo=powershell&amp;logoColor=white" alt="Windows PowerShell 5.1">
+</p>
 
-Sometimes you need Defender completely out of the way — deploying custom imaging software, running legacy tools that trigger false positives, benchmarking without AV overhead, or configuring kiosk systems. The built-in Windows UI only lets you temporarily disable real-time protection, and it re-enables itself within minutes.
+<p align="center">
+  <a href="https://github.com/SysAdminDoc/DefenderControl/releases/latest"><strong>Download the portable release</strong></a>
+  &nbsp;|&nbsp;
+  <a href="#quick-start"><strong>Quick start</strong></a>
+  &nbsp;|&nbsp;
+  <a href="#safety-model"><strong>Read the safety model</strong></a>
+</p>
 
-Defender Control performs a thorough multi-phase disable that persists across reboots by targeting preferences, group policy registry keys, services, scheduled tasks, PPL flags, and more. Everything is fully reversible with a single click.
+<p align="center">
+  <img src=".github/social-preview.png" alt="DefenderControl dashboard and safety features" width="100%">
+</p>
 
-> **Windows Firewall is completely untouched.** This tool only manages Defender antivirus components. Starting in v3.2.0, this guarantee is machine-checked: every Disable/Enable run snapshots Get-NetFirewallProfile and the mpssvc/BFE service state before the first change and verifies it after the last change. Any divergence is logged as an error.
+> [!CAUTION]
+> Disabling endpoint protection increases risk. Use DefenderControl for a
+> controlled maintenance window, test lab, imaging workflow, or a machine with
+> suitable alternative protection. Read the current state first and schedule
+> re-enable when a time limit makes sense.
 
----
+## Why administrators use it
 
-## Features
+Windows can turn real-time protection back on shortly after the standard toggle
+is changed. DefenderControl coordinates the related preferences, policies,
+services, tasks, and PPL flags that matter during a maintenance window. It can
+then replay the recorded registry state and restore the normal configuration.
 
-- **10-Phase Disable** — Preferences, group policy, notifications, scheduled tasks, services, PPL flags, context menus, SmartScreen, and process termination
-- **7-Phase Enable** — Full restoration to Windows defaults with signature update and verification
-- **Fully Async GUI** — All operations run in background runspaces; the window never freezes
-- **4-Level Permission Escalation** — Direct write → .NET handle with ownership → reg.exe → SYSTEM scheduled task
-- **PPL Flag Stripping** — Removes Protected Process Light from Defender services so they don't survive reboot
-- **System Restore Point** — Automatically created before disabling for easy rollback
-- **Dry Run Mode** — Simulate the entire operation without making any changes
-- **Verbose Toggle** — Filter log output between important-only and full diagnostic detail
-- **Export Log** — Save the full operation log to a text file for troubleshooting or documentation
-- **Reboot Button** — Appears after operations that need a restart
-- **OS Build Awareness** — Detects Win10/11, warns on deprecated GP keys (Win11 22H2+), blocks unsupported versions
-- **Self-Elevation** — Automatically requests Administrator via UAC
-- **Orphan Cleanup** — Removes leftover scheduled tasks from interrupted previous runs
-- **Firewall Integrity Guard** — Snapshots firewall profile state + mpssvc/BFE service state before Phase 1; verifies no divergence after Phase 10
-- **Third-Party AV Pre-Flight** — Warns via Security Center WMI when no non-Microsoft AV is registered before disabling
-- **Undo / Audit Manifest** — Every Disable/Enable writes a JSON audit record to `%ProgramData%\DefenderControl\manifests\`; view with `-Mode Manifest`
-- **PPL Status Dashboard** — Shows current Protected Process Light state for WinDefend, WdFilter/WdBoot, and WdNisDrv
-- **Event Log Source** — Writes Disable/Enable start and completion events to the Windows Application log under `DefenderControl`
-- **Atomic Undo Replay** — Records registry before/after values in manifests and replays the latest Disable manifest during Enable
-- **MDE / Passive-Mode Preflight** — Reports Defender `Normal`, `Passive`, `EDR Block Mode`, or `Disabled` state, platform version, passive-mode policy, MDE onboarding signals, and managed-device warnings before mutation
-- **Support Bundle Export** — Creates a ZIP with extended Health JSON, the latest manifest, operation log, recent DefenderControl event entries, crash logs, and optional `MpSupportFiles.cab`
+The app is deliberately narrow. It does not remove Defender files, modify boot
+configuration, disable Windows Update, or touch Windows Firewall.
 
----
+- **See the whole state first.** The dashboard reports real-time and cloud
+  protection, Tamper Protection, service and PPL state, Defender mode, platform
+  version, definition age, and managed-device signals.
+- **Practice without changing anything.** Dry Run walks the same operation path
+  and writes the planned work to the log.
+- **Keep recovery close.** A restore point, transaction manifest, scheduled
+  re-enable, and post-change verification give the operation more than one way
+  back.
+- **Leave evidence.** Manifests, Windows Application events, verification JSON,
+  and redacted support bundles make the work reviewable later.
+
+## Product screenshots
+
+<p align="center">
+  <img src="screenshots/defender-control-dashboard-v3.3.4.png" alt="DefenderControl live status dashboard" width="820">
+</p>
+
+<p align="center"><sub>The production WPF layout rendered offscreen with representative sample status. No Defender setting was changed for the capture.</sub></p>
+
+<p align="center">
+  <img src="screenshots/defender-control-tamper-guidance-v3.3.4.png" alt="DefenderControl blocking guidance when Tamper Protection is on" width="820">
+</p>
+
+<p align="center"><sub>Tamper Protection gets an explicit blocking explanation and a direct route to Windows Security.</sub></p>
+
+## Safety model
+
+DefenderControl treats disable and restore as auditable operations, not blind
+toggles.
+
+| Guardrail | What it does |
+| --- | --- |
+| Dry Run | Shows the planned phases without changing Defender. |
+| Restore point | Requests a Windows restore point before disable. Windows can throttle this to one point per 24 hours. |
+| Firewall integrity check | Snapshots all firewall profiles plus `mpssvc` and `BFE`, then verifies they did not change. |
+| Third-party AV preflight | Warns when Windows Security Center reports no alternative antivirus. |
+| Tamper Protection gate | Explains the manual Windows Security step when Tamper Protection would undo the work. |
+| Managed-device warning | Reports Defender for Endpoint, passive mode, EDR Block Mode, and device-policy signals before mutation. |
+| Atomic transaction log | Records each registry value before and after the change, including whether it existed and its value kind. |
+| Scheduled re-enable | Creates a self-cleaning SYSTEM task for 1, 2, 4, 8, or 24 hours. |
+| Verification | Checks the effective state after disable or restore and uses stable exit codes for automation. |
+
+No recovery mechanism can make disabling security software risk-free. A domain
+policy, Tamper Protection, a Windows update, or a locked service can override a
+local change. The app reports those cases instead of claiming success from a
+registry write alone.
 
 ## Requirements
 
 | Requirement | Details |
-|---|---|
-| **OS** | Windows 10 (1809+) or Windows 11 |
-| **PowerShell** | Windows PowerShell 5.1 (not PowerShell 7) |
-| **Privileges** | Administrator (auto-elevates via UAC) |
-| **Tamper Protection** | Should be OFF for full effectiveness (see below) |
+| --- | --- |
+| Windows | Windows 10 1809 or newer, or Windows 11 |
+| Shell | Windows PowerShell 5.1. Launching from PowerShell 7 hands off automatically. |
+| Rights | Administrator. The GUI requests UAC elevation when needed. |
+| Tamper Protection | Must be turned off manually for a complete disable operation. |
 
----
+## Quick start
 
-## Usage
+1. Download `DefenderControl-v3.3.4.zip` from the [latest release](https://github.com/SysAdminDoc/DefenderControl/releases/latest).
+2. Extract the ZIP and review `README.md` plus `SHA256SUMS.txt` on the release page.
+3. Right-click `DefenderControl.ps1` and choose **Run with PowerShell**.
+4. Check the dashboard. Use **Dry Run** first if this is a new machine or policy environment.
+5. Turn off Tamper Protection in Windows Security if the app reports it as on.
+6. Choose **Disable Defender** or **Enable Defender**. Reboot if the result asks for it.
 
-### Quick Start
-
-1. Download `DefenderControl.ps1`
-2. Right-click → **Run with PowerShell** (or it will self-elevate)
-3. Disable Tamper Protection first if you haven't already
-4. Click **Disable Defender** or **Enable Defender**
-5. Reboot when prompted
-
-### Tamper Protection
-
-For the disable operation to fully persist, Tamper Protection must be turned off **manually** — Microsoft does not allow programmatic control of this setting.
-
-**Windows Security → Virus & Threat Protection → Manage Settings → Tamper Protection → Off**
-
-The tool detects Tamper Protection status and warns you if it's still on. Operations will still run, but Windows will silently revert many registry changes.
-
-### Dry Run Mode
-
-Check the **Dry Run** checkbox before clicking Disable or Enable. The tool will log exactly what it *would* do without making any changes. Useful for auditing or understanding the scope before committing.
-
-### Command Line
+You can also launch it from an elevated console:
 
 ```powershell
-# Launch the WPF GUI
-powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1"
-
-# Print current Defender state
-powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Status
-
-# Extended state: services + PPL + scheduled tasks + policy keys + third-party AV
-powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Health
-
-# Emit stable JSON for automation pipelines
-powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Health -Json
-
-# Create a support bundle on the Desktop
-powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode SupportBundle
-
-# Include the optional Microsoft Defender diagnostic CAB
-powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode SupportBundle -MpSupportFiles
-
-# Show CLI usage
-powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Help
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\DefenderControl.ps1"
 ```
 
-Health JSON includes `DefenderMode`, `DefenderPlatformVersion`,
-`AMRunningMode`, `ForceDefenderPassiveMode`, MDE onboarding/status signals,
-managed tamper-protection signals, and `ManagedDeviceWarning` when local
-changes may be overridden by Defender for Endpoint or device policy. Disable
-and Enable manifests also record the read-only endpoint snapshot before and
-after the operation.
+## Read-only command line
 
-**Exit codes:** `0` success, `1` partial, `2` blocked by Tamper Protection, `3` Safe Mode required, `4` usage / OS error, `5` verification failure.
-
-`-Mode Disable` and `-Mode Enable` are reserved — use the GUI for mutating operations. Read-only Status / Health / Verify / Manifest modes are CLI-safe.
-
-> **Note on elevation:** all CLI modes require Administrator privileges. If you invoke the script from a non-elevated shell, it re-launches in a new UAC-elevated window and the CLI output appears there, not in your calling shell. For automation pipelines, elevate the calling shell once (`Start-Process powershell -Verb RunAs`) and then invoke the script normally so stdout/stderr return to the caller.
-
-### Verify Mode
+The command line is designed for inventory, verification, and support data.
+Disable and Enable remain GUI-only so a mutating operation keeps its status,
+warnings, and recovery controls visible.
 
 ```powershell
-# Assert Defender is fully enabled (exit 0 PASS, exit 5 FAIL, exit 2 if Tamper blocked)
-powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Verify -Expect Enabled
+# Compact current state
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\DefenderControl.ps1" -Mode Status
 
-# Assert Defender is fully disabled after a Disable run
-powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Verify -Expect Disabled
+# Services, PPL, tasks, policy keys, Defender mode, and third-party AV
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\DefenderControl.ps1" -Mode Health
 
-# Opt-in synthetic detection test (writes a harmless EICAR test file, waits 2.5s, cleans up)
-powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Verify -Expect Enabled -Eicar -Force
+# Stable JSON for inventory or automation
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\DefenderControl.ps1" -Mode Health -Json
 
-# JSON shape for automation: { expectation, overall, failCount, checks[] }
-powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Verify -Json
+# Review the latest operation manifest
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\DefenderControl.ps1" -Mode Manifest -Json
+
+# Create a redacted support ZIP on the Desktop
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\DefenderControl.ps1" -Mode SupportBundle
 ```
 
-### Undo / Audit Manifests
+All modes require Administrator rights. When a non-elevated CLI process triggers
+UAC, output appears in the elevated window. Elevate the calling shell first when
+stdout, stderr, and the exit code must return to an automation caller.
 
-Every Disable and Enable run writes a JSON audit manifest to `%ProgramData%\DefenderControl\manifests\<operation>-<timestamp>.json` with firewall before/after snapshots, third-party AV detection, and the list of phases that ran. View the latest:
+### Verify the effective state
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Manifest
-powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Manifest -Json
+# Expect normal protection
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\DefenderControl.ps1" -Mode Verify -Expect Enabled
 
-# List manifests and show the default retention policy (30 days / 50 files)
-powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Manifest -ListManifests
+# Expect a completed disable operation
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\DefenderControl.ps1" -Mode Verify -Expect Disabled
 
-# Prune old manifests; the explicit age can be adjusted for this run
-powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Manifest -PruneManifests -RetentionDays 30
-
-# Export the latest manifest and operation logs with host/provider/registry data redacted
-powershell.exe -ExecutionPolicy Bypass -File "DefenderControl.ps1" -Mode Manifest -Redact -OutputPath "$env:USERPROFILE\Desktop\DefenderControl-Redacted.zip"
+# Machine-readable verification report
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\DefenderControl.ps1" -Mode Verify -Json
 ```
 
-Manifest retention defaults to 30 days and the newest 50 files. The GUI log
-controls provide **Manifests**, **Redact**, and **Prune** actions with the same
-policy. Redacted exports are ZIP archives containing a sanitized manifest and
-operation log; the original audit files are not modified.
+The optional EICAR check writes the standard harmless detection string to a
+temporary path, waits for Defender, and cleans the path. It requires both
+`-Eicar` and `-Force`:
 
-### Support Bundles
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\DefenderControl.ps1" -Mode Verify -Expect Enabled -Eicar -Force
+```
 
-Use the GUI's **Support Bundle** button or the CLI `-Mode SupportBundle` to
-create a ZIP for troubleshooting. It contains `Health.json`, the latest audit
-manifest (when available), the operation log, recent `DefenderControl`
-Application event entries, recent crash logs, and bundle metadata. Use
-`-MpSupportFiles` or choose the optional diagnostic collection in the GUI to
-run Microsoft's `MpCmdRun.exe -GetFiles` and include `MpSupportFiles.cab` when
-the Defender tool is available. The bundle is written to the Desktop by
-default; `-OutputPath` selects another ZIP path.
+| Exit code | Meaning |
+| --- | --- |
+| `0` | Success |
+| `1` | Partial result |
+| `2` | Blocked by Tamper Protection |
+| `3` | Safe Mode is required for a locked change |
+| `4` | Usage or unsupported-OS error |
+| `5` | Verification failed |
 
-### Local Validation
+## What changes during disable
 
-Run the full local validation harness from the repository root:
+The ten phases are visible in the operation log:
+
+1. Request a System Restore point.
+2. Read Tamper Protection and current endpoint state.
+3. Apply Defender preferences and exclusions needed for the maintenance window.
+4. Apply Defender policy registry values.
+5. Change Defender notifications and its tray startup entry.
+6. Disable Defender scheduled tasks.
+7. Change Defender service start values and related PPL flags.
+8. Remove the Defender Explorer context-menu entries.
+9. Change SmartScreen and signature-update settings.
+10. Stop non-protected Defender processes and verify the result.
+
+Enable replays the latest disable manifest in reverse, applies known Windows
+defaults where needed, restores tasks and shell entries, updates signatures,
+starts the services it can start, and verifies the effective state.
+
+## Manifests and support bundles
+
+Each operation writes JSON under
+`%ProgramData%\DefenderControl\manifests\`. The default retention policy keeps
+30 days and the newest 50 files. The GUI and `-Mode Manifest` can list, prune,
+or export them.
+
+Manifests and logs can contain the computer name, Defender platform details,
+installed security-provider names, registry paths, and phase results. Use the
+**Redact** action before sharing data. A support bundle can also include recent
+Application events, crash logs, and an optional Microsoft `MpSupportFiles.cab`.
+
+## Known limits
+
+- Tamper Protection cannot be disabled programmatically. Windows may appear to
+  accept a setting and then restore it.
+- Defender for Endpoint, Intune, or domain policy can override local state.
+- `MsMpEng.exe` runs as a protected process and normally remains until reboot.
+- Windows Home accepts many policy registry values but does not provide the
+  same Group Policy behavior as Pro or Enterprise.
+- A heavily locked service key can require a controlled Safe Mode maintenance
+  window.
+
+## Build and verification
+
+Run the full local validation harness under Windows PowerShell 5.1:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".factory\test-all.ps1"
 ```
 
-The harness checks both PowerShell parsers, validates the functions injected
-into GUI runspaces, runs the isolated state/verify/transaction/support tests,
-and fails on any PSScriptAnalyzer rule not listed as a documented baseline.
+It checks both PowerShell parsers, loads the production XAML, validates the
+functions injected into background runspaces, exercises state, verification,
+transaction replay, support bundles, and manifest controls, then runs the
+documented PSScriptAnalyzer baseline.
 
-### Portable Release ZIP
-
-Build the local release asset from the repository root:
+Rebuild the brand assets, screenshots, marketing card, and portable ZIP with:
 
 ```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".factory\build-brand-assets.ps1"
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File ".factory\capture-marketing.ps1" -State Dashboard -OutputPath "screenshots\defender-control-dashboard-v3.3.4.png"
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File ".factory\capture-marketing.ps1" -State Tamper -OutputPath "screenshots\defender-control-tamper-guidance-v3.3.4.png"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".factory\build-marketing-assets.ps1"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".factory\build-release.ps1"
 ```
 
-The build cleans `dist\`, creates `dist\DefenderControl-v3.3.3.zip` containing `DefenderControl.ps1`, `README.md`, and `LICENSE`, then writes release checksums to `dist\SHA256SUMS.txt`.
+The capture script renders the production WPF XAML in a hidden offscreen window
+with sample values. It does not query or change Defender. The release build
+cleans `dist\`, creates `DefenderControl-v3.3.4.zip`, includes the documentation
+assets, and writes SHA-256 checksums.
 
----
+## Privacy and security
 
-## What It Does
+DefenderControl has no account, telemetry service, or resident background
+process. It writes local logs, manifests, scheduled restore tasks, crash logs,
+and Windows Application events as described above. Review the script before
+running it on a production machine.
 
-### Disable Operation (10 Phases)
-
-| Phase | Action |
-|---|---|
-| 1 | **System Restore Point** — Creates a restore point before making changes |
-| 2 | **Tamper Protection Check** — Detects and warns if Tamper Protection is blocking changes |
-| 3 | **Preferences** — Disables 25 `Set-MpPreference` settings, adds wildcard exclusions for drives/extensions/processes |
-| 4 | **Group Policy Registry** — Sets 19 policy keys (DisableAntiSpyware, DisableRealtimeMonitoring, SpynetReporting, etc.) |
-| 5 | **Notifications & Systray** — Suppresses all Defender notifications, hides system tray icon, disables SecurityHealth autostart |
-| 6 | **Scheduled Tasks** — Disables 5 Defender tasks (Cache Maintenance, Cleanup, Scan, Verification, ExploitGuard) |
-| 7 | **Services** — Sets `Start=4` (Disabled) for 8 services with permission escalation, strips PPL flags from 4 core services |
-| 8 | **Context Menus** — Removes "Scan with Microsoft Defender" from right-click menus |
-| 9 | **Additional** — Disables SmartScreen, suppresses signature auto-updates |
-| 10 | **Processes** — Kills non-protected processes, logs PPL status for MsMpEng |
-
-### Enable Operation (7 Phases)
-
-| Phase | Action |
-|---|---|
-| 1 | **Remove Policies** — Deletes entire Defender policy registry tree |
-| 2 | **Restore Preferences** — Restores 24 settings to defaults, clears all exclusions |
-| 3 | **Restore Services** — Sets default start types, restores PPL flags, starts services |
-| 4 | **Scheduled Tasks** — Re-enables all 5 tasks |
-| 5 | **Context Menus & Systray** — Restores context menu GUIDs, autostart, notifications, SmartScreen |
-| 6 | **Signature Update** — Triggers `Update-MpSignature` |
-| 7 | **Verify** — Queries `Get-MpComputerStatus` to confirm restoration |
-
----
-
-## What It Does NOT Do
-
-- Does **not** touch Windows Firewall
-- Does **not** delete Defender binaries or Windows components
-- Does **not** modify boot configuration or safe mode settings
-- Does **not** disable Windows Update
-- All changes are **fully reversible** via the Enable button or System Restore
-
----
-
-## Permission Escalation
-
-Defender service registry keys (WinDefend, WdFilter, etc.) are protected even from Administrators. The tool uses a 4-level escalation chain:
-
-1. **Direct write** via `Set-ItemProperty` — works for unprotected keys
-2. **Take ownership + .NET handle** — P/Invoke `SeTakeOwnershipPrivilege`, set owner to Administrators SID, grant FullControl, write via `RegistryKey.SetValue()`
-3. **reg.exe** — Command-line registry editor sometimes bypasses PowerShell permission constraints
-4. **SYSTEM scheduled task** — Creates a one-shot task running as SYSTEM to execute `reg.exe add`, verifies the write, then cleans up
-
-The log shows exactly which method succeeded for each key.
-
----
-
-## Known Limitations
-
-- **MsMpEng.exe** (Antimalware Service Executable) runs as a Protected Process Light (PPL) and **cannot be killed** in the current session. Once services are disabled and PPL flags are stripped, it will not restart after reboot.
-
-- **Tamper Protection** will silently revert registry changes if left on. The tool detects this and warns you, but cannot programmatically disable it.
-
-- **Windows Home editions** lack Group Policy support. Phase 4 registry keys will still be written but may have reduced effectiveness.
-
-- **Checkpoint-Computer** (System Restore) is throttled to one restore point per 24 hours by Windows. If one was created recently, the tool logs a warning and continues.
-
-- **Some heavily locked service keys** may resist all 4 escalation methods. In this case, use a controlled Safe Mode maintenance window.
-
----
-
-## Log Colors
-
-| Color | Meaning |
-|---|---|
-| 🔵 Blue | Informational messages |
-| 🟢 Green | Successful operations |
-| 🟠 Orange | Warnings (non-fatal) |
-| 🔴 Red | Errors (operation failed) |
-| 🟣 Purple | Phase headers |
-| ⚫ Gray | Verbose diagnostics |
-
----
+Security reports can be filed through the repository's private security
+advisory form. Do not put sensitive machine or policy data in a public issue.
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
-
----
-
-## Disclaimer
-
-This tool is intended for system administrators, IT professionals, and power users who understand the security implications of disabling endpoint protection. Disabling Defender leaves your system vulnerable to malware.
-
-**Use at your own risk.** Always ensure you have alternative security measures in place when Defender is disabled.
+DefenderControl is available under the [MIT License](LICENSE).

@@ -1,6 +1,21 @@
-# Research - Defender Control
+# Defender Control Research
 
-## Executive Summary
+## 2026-09-05 Delivery Update
+
+DefenderControl v3.3.4 now presents its strongest differentiator clearly: it is
+a controlled maintenance workflow with recovery and evidence, not a blind AV
+toggle. The WPF app has a native icon, two reproducible product captures, and a
+repository card. The README leads with risk, dry run, firewall integrity,
+scheduled re-enable, transaction replay, and verification before it explains
+the lower-level disable phases.
+
+The prior release gap is also resolved by this delivery once v3.3.4 is
+published. The local validation harness and portable ZIP build remain the
+release gates. The screenshots are rendered from production XAML in an
+offscreen window with clearly disclosed sample values, so they do not require
+changing Defender on the capture machine.
+
+## Earlier Executive Summary (Historical Snapshot)
 Defender Control is a portable PowerShell 5.1/WPF utility for reversible Microsoft Defender disable/enable workflows on Windows 10/11. Its strongest current shape is the safety work already present: async GUI operations, restore-point creation, firewall integrity checks, third-party AV warnings, manifests, verification mode, PPL dashboard, event-log writes, and a ZIP build harness. Top opportunities, in order: publish the already-built v3.3.0 release asset, stop swallowing background worker crashes, make manifest replay fully lossless, detect Microsoft Defender for Endpoint/passive-mode constraints before mutation, add first-class support bundles, formalize local Pester/PSScriptAnalyzer validation, add WPF accessibility metadata, and add manifest retention/redaction.
 
 ## Product Map

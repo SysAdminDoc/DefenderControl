@@ -13,6 +13,9 @@ $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).ProviderPath
 $scriptPath = Join-Path $root 'DefenderControl.ps1'
 $readmePath = Join-Path $root 'README.md'
 $licensePath = Join-Path $root 'LICENSE'
+$assetsPath = Join-Path $root 'assets'
+$screenshotsPath = Join-Path $root 'screenshots'
+$socialPreviewPath = Join-Path $root '.github\social-preview.png'
 $checksumPath = Join-Path $root 'SHA256SUMS.txt'
 
 function Get-Sha256Hex {
@@ -35,7 +38,7 @@ function Get-Sha256Hex {
     }
 }
 
-foreach ($required in @($scriptPath, $readmePath, $licensePath)) {
+foreach ($required in @($scriptPath, $readmePath, $licensePath, $assetsPath, $screenshotsPath, $socialPreviewPath)) {
     if (-not (Test-Path -LiteralPath $required)) {
         throw "Required payload file missing: $required"
     }
@@ -66,6 +69,12 @@ New-Item -Path $stage -ItemType Directory -Force | Out-Null
 foreach ($fileName in @('DefenderControl.ps1', 'README.md', 'LICENSE')) {
     Copy-Item -LiteralPath (Join-Path $root $fileName) -Destination (Join-Path $stage $fileName) -Force
 }
+foreach ($directoryName in @('assets', 'screenshots')) {
+    Copy-Item -LiteralPath (Join-Path $root $directoryName) -Destination (Join-Path $stage $directoryName) -Recurse -Force
+}
+$stageGitHub = Join-Path $stage '.github'
+[System.IO.Directory]::CreateDirectory($stageGitHub) | Out-Null
+Copy-Item -LiteralPath $socialPreviewPath -Destination (Join-Path $stageGitHub 'social-preview.png') -Force
 
 Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zipPath -Force
 Remove-Item -LiteralPath $stage -Recurse -Force
@@ -73,11 +82,19 @@ Remove-Item -LiteralPath $stage -Recurse -Force
 $scriptHash = Get-Sha256Hex -Path $scriptPath
 $zipHash = Get-Sha256Hex -Path $zipPath
 
-Set-Content -LiteralPath $checksumPath -Value ("$scriptHash *DefenderControl.ps1") -Encoding ASCII
-Set-Content -LiteralPath $releaseSumsPath -Value @(
-    "$scriptHash *DefenderControl.ps1"
-    "$zipHash *DefenderControl-v$version.zip"
-) -Encoding ASCII
+[System.IO.File]::WriteAllText(
+    $checksumPath,
+    ("$scriptHash *DefenderControl.ps1`n"),
+    [System.Text.Encoding]::ASCII
+)
+[System.IO.File]::WriteAllText(
+    $releaseSumsPath,
+    ((@(
+        "$scriptHash *DefenderControl.ps1"
+        "$zipHash *DefenderControl-v$version.zip"
+    ) -join "`n") + "`n"),
+    [System.Text.Encoding]::ASCII
+)
 
 Write-Host "Built dist/DefenderControl-v$version.zip"
 Write-Host "Updated SHA256SUMS.txt"

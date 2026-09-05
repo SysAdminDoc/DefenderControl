@@ -8,6 +8,9 @@ CODEX_CHANGELOG.md
 .codex/
 .factory/*
 !.factory/build-release.ps1
+!.factory/build-brand-assets.ps1
+!.factory/build-marketing-assets.ps1
+!.factory/capture-marketing.ps1
 !.factory/test-*.ps1
 dist/
 

@@ -2,7 +2,25 @@
 
 All notable changes to DefenderControl will be documented in this file.
 
-## [v3.3.3] - 2026-08-12
+## [v3.3.4] (2026-09-05)
+
+### Added
+- DefenderControl now has a native shield-and-restore mark in the WPF header and
+  window chrome, plus transparent PNG sizes, a Windows ICO, and an SVG source.
+- Two screenshots render directly from the production XAML in a hidden
+  offscreen window. They show the normal dashboard and the Tamper Protection
+  guidance state without reading or changing the host's Defender settings.
+- A 1280 by 640 repository card is rebuilt from the verified icon and dashboard
+  capture by `.factory\build-marketing-assets.ps1`.
+
+### Changed
+- The README now leads with controlled maintenance, recovery, and auditability.
+  It also replaces broken encoded symbols, adds direct install guidance, and
+  states the security tradeoffs before the feature details.
+- Portable ZIPs now include the icon assets and screenshots so the bundled
+  README keeps its visual documentation when read offline.
+
+## [v3.3.3] (2026-08-12)
 
 ### Added
 - Defender for Endpoint/passive-mode preflight now reports normalized Defender
@@ -23,21 +41,21 @@ All notable changes to DefenderControl will be documented in this file.
   redacted ZIP export of the latest manifest and operation logs. The default
   policy is 30 days and 50 newest files, and is shown in the GUI and CLI.
 
-## [v3.3.2] - 2026-06-28
+## [v3.3.2] (2026-06-28)
 
 ### Fixed
 - Undo manifest replay is now lossless for registry transactions: manifests
   record prior value existence and registry value kind, and Enable replays
   transactions in reverse order to restore set, remove, and prior-absence cases.
 
-## [v3.3.1] - 2026-06-27
+## [v3.3.1] (2026-06-27)
 
 ### Fixed
 - Background runspace failures now surface in the GUI log/status, write a
   crash log under `%ProgramData%\DefenderControl\logs\`, and emit Application
   event ID 9001 when event logging is available.
 
-## [v3.3.0] - 2026-06-19
+## [v3.3.0] (2026-06-19)
 
 ### Added
 - **Portable ZIP release asset**: `.factory/build-release.ps1` cleans `dist/`,
@@ -63,7 +81,7 @@ All notable changes to DefenderControl will be documented in this file.
   applying defaults. The replay summary (source file, restored count, failed
   count) is recorded in the Enable manifest under `undoReplay`.
 
-## [v3.2.1] - 2026-04-24
+## [v3.2.1] (2026-04-24)
 
 ### Fixed
 - Running the script from PowerShell 7 (pwsh.exe) no longer errors out with
@@ -73,7 +91,7 @@ All notable changes to DefenderControl will be documented in this file.
   stderr / exit codes return to the caller; GUI mode fires a new window. If
   the caller isn't already elevated, the re-launch also handles UAC.
 
-## [v3.2.0] - 2026-04-24
+## [v3.2.0] (2026-04-24)
 
 ### Added
 - CLI mode with `-Mode Status|Health|Verify|Manifest` for read-only state
@@ -117,15 +135,15 @@ All notable changes to DefenderControl will be documented in this file.
 ### Fixed
 - README hero image referenced a deleted `icon.svg` asset
 
-## [v3.1.0] - 2026-03-18
+## [v3.1.0] (2026-03-18)
 
 - Live status dashboard, Tamper Protection guidance, scheduled re-enable, log panel
 
-## [v3.0.0] - initial
+## [v3.0.0] (initial)
 
 - Initial WPF GUI with async disable/enable, log panel, dry run mode
 
-## Roadmap archive — 2026-08-10 — ROADMAP.md
+## Roadmap archive: 2026-08-10, ROADMAP.md
 
 <details>
 <summary>Original roadmap snapshot</summary>
@@ -141,35 +159,35 @@ No actionable roadmap items remain. Blocked or deferred items are tracked in `Ro
 
 ## Research-Driven Additions
 
-- [ ] P1 - Add Defender for Endpoint and passive-mode preflight
+- [ ] P1: Add Defender for Endpoint and passive-mode preflight
   Why: Microsoft documents `AMRunningMode`, `ForceDefenderPassiveMode`, EDR Block Mode, and managed Tamper Protection behavior that can change disable/enable results.
   Evidence: Microsoft Defender Antivirus compatibility docs; `DefenderControl.ps1:318` state model lacks these fields.
   Touches: `Get-DefenderState`, Health/Verify JSON, dashboard tiles, manifests, disable pre-flight warnings
   Acceptance: Health JSON and GUI show Normal/Passive/EDR Block/Disabled, MDE/passive-mode registry signals, platform version, and a clear managed-device warning before mutation.
   Complexity: M
 
-- [ ] P1 - Add support bundle export
+- [ ] P1: Add support bundle export
   Why: Users need one artifact for failed disables/enables, and Microsoft provides `MpCmdRun.exe -GetFiles` for Defender diagnostics.
   Evidence: Microsoft Defender diagnostic collection docs; existing manual log export in `DefenderControl.ps1:2839`
   Touches: `DefenderControl.ps1` export handler, manifests, event-log helper, CLI read-only surface
   Acceptance: GUI and CLI can generate a ZIP containing Health JSON, latest manifest, operation log, recent DefenderControl event-log entries, and optional `MpSupportFiles.cab`.
   Complexity: M
 
-- [ ] P1 - Formalize local validation harness
+- [ ] P1: Formalize local validation harness
   Why: Current `.factory` scripts cover isolated state/verify paths but not runspace shared-function parity, linting, or transaction replay.
   Evidence: `.factory\test-state.ps1`; `.factory\test-verify.ps1`; Pester and PSScriptAnalyzer docs
   Touches: `.factory`, `DefenderControl.ps1`
   Acceptance: One local test command runs parse checks, SharedFunctions extraction/parity checks, verify/state tests, transaction replay tests, and PSScriptAnalyzer with documented suppressions.
   Complexity: M
 
-- [ ] P2 - Add WPF accessibility metadata
+- [ ] P2: Add WPF accessibility metadata
   Why: The dashboard is color-heavy and the XAML lacks broad `AutomationProperties.Name` coverage.
   Evidence: `DefenderControl.ps1:981`; Microsoft WPF AutomationProperties guidance
   Touches: XAML here-string in `DefenderControl.ps1`
   Acceptance: Main buttons, checkboxes, combo boxes, dashboard values, warning panel, and log controls expose stable automation names and non-color state text.
   Complexity: S
 
-- [ ] P2 - Add manifest retention and redaction controls
+- [ ] P2: Add manifest retention and redaction controls
   Why: Manifests and logs include host, AV provider, registry, and phase data, but no retention or redaction workflow exists.
   Evidence: `DefenderControl.ps1:1644`; `DefenderControl.ps1:1673`; `DefenderControl.ps1:2839`
   Touches: manifest writer, manifest CLI mode, log export, support bundle export

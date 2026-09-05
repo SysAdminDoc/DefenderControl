@@ -1,12 +1,12 @@
 <#
 .SYNOPSIS
-    Defender Control v3.3.3 - Comprehensive Microsoft Defender Disable/Enable Utility
+    Defender Control v3.3.4 - Comprehensive Microsoft Defender Disable/Enable Utility
 
 .DESCRIPTION
-    Professional WPF GUI + CLI tool to fully disable or re-enable Microsoft Defender
-    on Windows 10/11. Uses a multi-phase approach covering preferences, group policy
-    registry keys, services (with permission escalation), scheduled tasks, context
-    menus, notifications, SmartScreen, and Protected Process Light (PPL) flags.
+    WPF GUI and read-only CLI for controlled Microsoft Defender maintenance on
+    Windows 10/11. The guarded disable and restore workflows cover preferences,
+    group policy registry keys, services, scheduled tasks, context menus,
+    notifications, SmartScreen, and Protected Process Light (PPL) flags.
 
     WHAT THIS TOOL DOES:
       - Disables real-time protection, cloud delivery, behavior monitoring, etc.
@@ -23,11 +23,11 @@
     WHAT THIS TOOL DOES NOT DO:
       - Does NOT touch Windows Firewall (completely unaffected)
       - Does NOT delete Defender binaries or components
-      - All changes are fully reversible via the Enable button
+      - Records prior registry state for replay by the Enable workflow
 
     REQUIREMENTS:
       - Windows 10 (1809+) or Windows 11
-      - Windows PowerShell 5.1 (not PowerShell 7 - WPF requires it)
+      - Windows PowerShell 5.1; PowerShell 7 hands off automatically
       - Administrator privileges (self-elevates via UAC)
       - Tamper Protection should be OFF for full effectiveness:
         Windows Security > Virus & Threat Protection > Manage Settings > Tamper Protection
@@ -42,12 +42,12 @@
 
 .PARAMETER Mode
     When supplied, runs in CLI (no-GUI) mode. Values:
-      Status  - read-only snapshot of Defender state (exit 0)
-      Health  - extended read-only enumeration (services, PPL, tasks, policy keys)
-      Verify  - pass/fail assertion against enabled or disabled Defender state
-      SupportBundle - collect health, manifest, operation log, and event data into a ZIP
-      Disable - reserved (CLI disable not yet implemented; use GUI)
-      Enable  - reserved (CLI enable not yet implemented; use GUI)
+      Status: read-only snapshot of Defender state (exit 0)
+      Health: extended read-only enumeration (services, PPL, tasks, policy keys)
+      Verify: pass/fail assertion against enabled or disabled Defender state
+      SupportBundle: collect health, manifest, operation log, and event data into a ZIP
+      Disable: reserved (CLI disable not yet implemented; use GUI)
+      Enable: reserved (CLI enable not yet implemented; use GUI)
 
 .PARAMETER Json
     Emit a single JSON object to stdout instead of human-readable text.
@@ -81,12 +81,12 @@
     Repo   : https://github.com/SysAdminDoc/DefenderControl
 
     CLI exit codes:
-      0 - success
-      1 - partial success (some operations failed)
-      2 - blocked by Tamper Protection
-      3 - Safe Mode required for the requested operation
-      4 - usage error / unsupported OS / missing elevation
-      5 - verification failure
+      0: success
+      1: partial success (some operations failed)
+      2: blocked by Tamper Protection
+      3: Safe Mode required for the requested operation
+      4: usage error, unsupported OS, or missing elevation
+      5: verification failure
 
 .LINK
     https://github.com/SysAdminDoc/DefenderControl
@@ -285,7 +285,7 @@ if (-not $script:IsCliMode) {
     Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
 }
 
-$script:Version    = "3.3.3"
+$script:Version    = "3.3.4"
 $script:ManifestRetentionDays = 30
 $script:ManifestMaxCount = 50
 $script:DryRun     = [bool]$DryRun
@@ -330,7 +330,7 @@ try {
     }
     $script:EventLogReady = $true
 } catch {
-    # Non-fatal — event logging is best-effort
+    # Non-fatal: event logging is best-effort
     $script:EventLogReady = $false
 }
 
@@ -716,7 +716,7 @@ function Invoke-VerifyMode {
         _check 'WinDefendNotDisabled'      $true  ($state.WinDefendStartType -ne 'Disabled')
         _check 'NoGroupPolicyDisable'      $true  ($state.PolicyDisableAntiSpyware -ne 1)
     } else {
-        # 'Disabled' expectation — any of these signals successful disable
+        # 'Disabled' expectation: any of these signals successful disable
         $anyDisabled = (
             $state.RealTimeProtectionEnabled -eq $false -or
             $state.AntivirusEnabled -eq $false -or
@@ -1592,6 +1592,36 @@ try {
         <SolidColorBrush x:Key="TextSecondary" Color="#95a5a6"/>
         <SolidColorBrush x:Key="TextDim" Color="#7f8c8d"/>
 
+        <DrawingImage x:Key="AppIcon">
+            <DrawingImage.Drawing>
+                <DrawingGroup>
+                    <GeometryDrawing Brush="#12345f"
+                                     Geometry="M256,30 C204,66 151,91 74,115 V241 C74,350 139,432 256,482 C373,432 438,350 438,241 V115 C361,91 308,66 256,30 Z">
+                        <GeometryDrawing.Pen>
+                            <Pen Brush="#4da3ff" Thickness="16" LineJoin="Round"/>
+                        </GeometryDrawing.Pen>
+                    </GeometryDrawing>
+                    <GeometryDrawing Geometry="M256,69 C214,97 169,118 112,136 V239 C112,329 163,393 256,436 C349,393 400,329 400,239 V136 C343,118 298,97 256,69 Z">
+                        <GeometryDrawing.Pen>
+                            <Pen Brush="#f8fafc" Thickness="12" LineJoin="Round"/>
+                        </GeometryDrawing.Pen>
+                    </GeometryDrawing>
+                    <GeometryDrawing Geometry="M350,222 C332,169 279,139 224,147 C202,150 184,158 170,169">
+                        <GeometryDrawing.Pen>
+                            <Pen Brush="#ff5a52" Thickness="38" StartLineCap="Round" EndLineCap="Round"/>
+                        </GeometryDrawing.Pen>
+                    </GeometryDrawing>
+                    <GeometryDrawing Brush="#ff5a52" Geometry="M136,202 L151,151 L190,181 Z"/>
+                    <GeometryDrawing Geometry="M162,290 C181,343 235,372 290,362 C312,358 329,350 342,340">
+                        <GeometryDrawing.Pen>
+                            <Pen Brush="#2dd47a" Thickness="38" StartLineCap="Round" EndLineCap="Round"/>
+                        </GeometryDrawing.Pen>
+                    </GeometryDrawing>
+                    <GeometryDrawing Brush="#2dd47a" Geometry="M379,302 L365,353 L327,322 Z"/>
+                </DrawingGroup>
+            </DrawingImage.Drawing>
+        </DrawingImage>
+
         <Style x:Key="ActionButton" TargetType="Button">
             <Setter Property="Foreground" Value="White"/>
             <Setter Property="FontSize" Value="14"/>
@@ -1767,12 +1797,21 @@ try {
 
         <!-- Header -->
         <Grid Grid.Row="0" Margin="0,0,0,12">
-            <StackPanel VerticalAlignment="Center">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Image Grid.Column="0" Source="{StaticResource AppIcon}" Width="38" Height="42"
+                   Stretch="Uniform" Margin="0,0,12,0"
+                   AutomationProperties.Name="DefenderControl shield and restore mark"/>
+            <StackPanel Grid.Column="1" VerticalAlignment="Center">
                 <TextBlock x:Name="txtTitle" Text="DEFENDER CONTROL" FontSize="24" FontWeight="Bold"
                            Foreground="{StaticResource TextPrimary}" Margin="0,0,0,2"/>
                 <TextBlock x:Name="txtSubtitle" Text="" FontSize="12" Foreground="{StaticResource TextDim}"/>
             </StackPanel>
             <CheckBox x:Name="chkDryRun" Content=" Dry Run (simulate only)"
+                      Grid.Column="2"
                       AutomationProperties.Name="Dry run mode"
                       AutomationProperties.HelpText="Simulate the operation without changing Defender settings"
                       Style="{StaticResource DarkCheck}" HorizontalAlignment="Right"
@@ -2094,6 +2133,7 @@ try {
 # ==================================================================================
 $reader  = [System.Xml.XmlNodeReader]::new($xaml)
 $window  = [Windows.Markup.XamlReader]::Load($reader)
+$window.Icon = $window.Resources['AppIcon']
 
 $txtTitle    = $window.FindName("txtTitle")
 $txtSubtitle = $window.FindName("txtSubtitle")
