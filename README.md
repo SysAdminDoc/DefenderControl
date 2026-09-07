@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-3.3.4-4da3ff?style=flat-square" alt="Version 3.3.4">
+  <img src="https://img.shields.io/badge/version-3.3.5-4da3ff?style=flat-square" alt="Version 3.3.5">
   <img src="https://img.shields.io/badge/license-MIT-2dd47a?style=flat-square" alt="MIT License">
   <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?style=flat-square&amp;logo=windows" alt="Windows 10 and 11">
   <img src="https://img.shields.io/badge/PowerShell-5.1-5391FE?style=flat-square&amp;logo=powershell&amp;logoColor=white" alt="Windows PowerShell 5.1">
@@ -59,13 +59,13 @@ configuration, disable Windows Update, or touch Windows Firewall.
 ## Product screenshots
 
 <p align="center">
-  <img src="screenshots/defender-control-dashboard-v3.3.4.png" alt="DefenderControl live status dashboard" width="820">
+  <img src="screenshots/defender-control-dashboard-v3.3.5.png" alt="DefenderControl live status dashboard" width="820">
 </p>
 
 <p align="center"><sub>The production WPF layout rendered offscreen with representative sample status. No Defender setting was changed for the capture.</sub></p>
 
 <p align="center">
-  <img src="screenshots/defender-control-tamper-guidance-v3.3.4.png" alt="DefenderControl blocking guidance when Tamper Protection is on" width="820">
+  <img src="screenshots/defender-control-tamper-guidance-v3.3.5.png" alt="DefenderControl blocking guidance when Tamper Protection is on" width="820">
 </p>
 
 <p align="center"><sub>Tamper Protection gets an explicit blocking explanation and a direct route to Windows Security.</sub></p>
@@ -103,7 +103,7 @@ registry write alone.
 
 ## Quick start
 
-1. Download `DefenderControl-v3.3.4.zip` from the [latest release](https://github.com/SysAdminDoc/DefenderControl/releases/latest).
+1. Download `DefenderControl-v3.3.5.zip` from the [latest release](https://github.com/SysAdminDoc/DefenderControl/releases/latest).
 2. Extract the ZIP and review `README.md` plus `SHA256SUMS.txt` on the release page.
 3. Right-click `DefenderControl.ps1` and choose **Run with PowerShell**.
 4. Check the dashboard. Use **Dry Run** first if this is a new machine or policy environment.
@@ -232,15 +232,15 @@ Rebuild the brand assets, screenshots, marketing card, and portable ZIP with:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".factory\build-brand-assets.ps1"
-powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File ".factory\capture-marketing.ps1" -State Dashboard -OutputPath "screenshots\defender-control-dashboard-v3.3.4.png"
-powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File ".factory\capture-marketing.ps1" -State Tamper -OutputPath "screenshots\defender-control-tamper-guidance-v3.3.4.png"
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File ".factory\capture-marketing.ps1" -State Dashboard -OutputPath "screenshots\defender-control-dashboard-v3.3.5.png"
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File ".factory\capture-marketing.ps1" -State Tamper -OutputPath "screenshots\defender-control-tamper-guidance-v3.3.5.png"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".factory\build-marketing-assets.ps1"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".factory\build-release.ps1"
 ```
 
 The capture script renders the production WPF XAML in a hidden offscreen window
 with sample values. It does not query or change Defender. The release build
-cleans `dist\`, creates `DefenderControl-v3.3.4.zip`, includes the documentation
+cleans `dist\`, creates `DefenderControl-v3.3.5.zip`, includes the documentation
 assets, and writes SHA-256 checksums.
 
 ## Privacy and security

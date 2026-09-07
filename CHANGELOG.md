@@ -2,6 +2,15 @@
 
 All notable changes to DefenderControl will be documented in this file.
 
+## [v3.3.5] (2026-09-07)
+
+### Added
+- The repository now preserves all three original identity directions under
+  `assets/brand/concepts/`, including the approved flat shield and recovery
+  design.
+- An untouched copy of the approved master sits beside the production assets,
+  and `selection.json` records which direction moved forward.
+
 ## [v3.3.4] (2026-09-05)
 
 ### Added

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "project": "DefenderControl",
+  "selectedConcepts": [
+    "direction-02-selected-flat-shield-recovery.png"
+  ],
+  "selectedMasters": [
+    "../defendercontrol-selected-master.png"
+  ],
+  "guidance": "These files preserve the original visual exploration. Use selectedConcepts to identify the approved direction. Production assets elsewhere in the repository remain the files used by the product."
+}

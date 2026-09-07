@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Defender Control v3.3.4 - Comprehensive Microsoft Defender Disable/Enable Utility
+    Defender Control v3.3.5 - Comprehensive Microsoft Defender Disable/Enable Utility
 
 .DESCRIPTION
     WPF GUI and read-only CLI for controlled Microsoft Defender maintenance on
@@ -285,7 +285,7 @@ if (-not $script:IsCliMode) {
     Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
 }
 
-$script:Version    = "3.3.4"
+$script:Version    = "3.3.5"
 $script:ManifestRetentionDays = 30
 $script:ManifestMaxCount = 50
 $script:DryRun     = [bool]$DryRun
